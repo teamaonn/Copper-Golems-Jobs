@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "coppergolems",
+  "version": "${version}",
+  "name": "Copper Golems",
+  "description": "Foundation for starter-heart powered copper golems and minions.",
+  "authors": [
+    "Joshua"
+  ],
+  "contact": {},
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.joshua.coppergolems.CopperGolemsMod"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.0",
+    "minecraft": "~26.2-alpha.5",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}

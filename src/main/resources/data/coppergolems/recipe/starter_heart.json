@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "CRC",
+    "RAR",
+    "CRC"
+  ],
+  "key": {
+    "C": "minecraft:copper_ingot",
+    "R": "minecraft:redstone",
+    "A": "minecraft:apple"
+  },
+  "result": {
+    "id": "coppergolems:starter_heart",
+    "count": 1
+  }
+}

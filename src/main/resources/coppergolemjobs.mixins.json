@@ -1,0 +1,7 @@
+{
+  "required": true,
+  "package": "com.joshua.coppergolemjobs.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "mixins": ["CopperGolemMixin", "EntityDropMixin", "FishingHookAccess"],
+  "injectors": {"defaultRequire": 1}
+}

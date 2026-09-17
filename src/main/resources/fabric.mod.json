@@ -1,24 +1,18 @@
 {
   "schemaVersion": 1,
-  "id": "coppergolems",
+  "id": "coppergolemjobs",
   "version": "${version}",
-  "name": "Copper Golems",
-  "description": "Foundation for starter-heart powered copper golems and minions.",
-  "authors": [
-    "Joshua"
-  ],
-  "contact": {},
-  "license": "MIT",
+  "name": "Copper Golem Jobs",
+  "description": "Give a vanilla Copper Golem a job. No Copper Chest within 64 blocks, or no room, means no work.",
+  "authors": ["Joshua"],
   "environment": "*",
-  "entrypoints": {
-    "main": [
-      "com.joshua.coppergolems.CopperGolemsMod"
-    ]
-  },
+  "entrypoints": {"main": ["com.joshua.coppergolemjobs.CopperGolemJobsMod"]},
+  "mixins": ["coppergolemjobs.mixins.json"],
   "depends": {
-    "fabricloader": ">=0.19.0",
-    "minecraft": "~26.2-alpha.5",
+    "fabricloader": ">=0.19.5",
+    "minecraft": "26.2",
     "java": ">=25",
-    "fabric-api": "*"
-  }
+    "fabric-api": ">=0.160.0"
+  },
+  "breaks": {"coppergolems": "*"}
 }

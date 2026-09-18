@@ -3,16 +3,16 @@
   "id": "coppergolemjobs",
   "version": "${version}",
   "name": "Copper Golem Jobs",
-  "description": "Give a vanilla Copper Golem a job. No Copper Chest within 64 blocks, or no room, means no work.",
+  "description": "Give a vanilla Copper Golem a job. Copper Golems do not like water at all; water and lava can overwhelm them during work.",
   "authors": ["Joshua"],
   "environment": "*",
   "entrypoints": {"main": ["com.joshua.coppergolemjobs.CopperGolemJobsMod"]},
   "mixins": ["coppergolemjobs.mixins.json"],
   "depends": {
     "fabricloader": ">=0.19.5",
-    "minecraft": "26.2",
+    "minecraft": "26.3",
     "java": ">=25",
-    "fabric-api": ">=0.160.0"
+    "fabric-api": ">=0.160.6"
   },
   "breaks": {"coppergolems": "*"}
 }

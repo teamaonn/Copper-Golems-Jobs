@@ -1,10 +1,10 @@
-# Copper Golem Jobs — Fabric 26.2 — 0.2.2 test build
+# Copper Golem Jobs — Fabric 26.3 — 0.2.3 test build
 
 Give a vanilla Copper Golem a job by right-clicking it with a vanilla tool. No fuel, power source, hearts, upgrades, or tool durability costs.
 
 ## Install
 
-Use Minecraft Java **26.2**, Fabric Loader **0.19.5 or newer**, and Fabric API **0.160.0+26.2**. Put `copper-golem-jobs-fabric-26.2-0.2.2.jar` into `mods` alongside Fabric API. Remove the earlier `copper-golems` test mod before installing this restart; the two mods deliberately cannot load together.
+Use Minecraft Java **26.3**, Fabric Loader **0.19.5 or newer**, and Fabric API **0.160.6+26.3**. Put `copper-golem-jobs-fabric-26.3-0.2.3.jar` into `mods` alongside Fabric API. Remove the earlier `copper-golems` test mod before installing this restart; the two mods deliberately cannot load together.
 
 The mod uses vanilla mobs, items, blocks, and visuals. The jar works in single-player and on a Fabric server. Begin in a separate Creative test world because several jobs excavate terrain automatically.
 
@@ -60,9 +60,9 @@ The prebuilt jar is ready to test. To build from source, extract this source zip
 C:\Gradle\bin\gradle.bat build
 ```
 
-Use **JDK 25** and **Gradle 9.5.1 or newer compatible with Loom 1.17**. The project pins **Loom 1.17.20**, uses the unobfuscated Minecraft 26.2 names, and does not use Yarn mappings. Gradle downloads the dependencies on the first build.
+Use **JDK 25** and **Gradle 9.5.1 or newer compatible with Loom 1.18**. The project pins **Loom 1.18.2**, uses the unobfuscated Minecraft 26.3 names, and does not use Yarn mappings. Gradle downloads the dependencies on the first build.
 
-The installable output is `build/libs/copper-golem-jobs-fabric-26.2-0.2.2.jar`. The `-sources.jar` is source code for developers, not the mod to install.
+The installable output is `build/libs/copper-golem-jobs-fabric-26.3-0.2.3.jar`. The `-sources.jar` is source code for developers, not the mod to install.
 
 Optional headless game tests:
 
@@ -72,4 +72,4 @@ C:\Gradle\bin\gradle.bat -PgameTests=true runGameTest
 
 See `TESTING.md` for automated verification and the short in-game test checklist.
 
-API references: [Fabric 26.2 development notes](https://fabricmc.net/2026/06/15/262.html), [Loom](https://docs.fabricmc.net/develop/loom/), [Fabric game tests](https://docs.fabricmc.net/develop/automatic-testing), and the actual Mojang 26.2 server classes. Game and Fabric binaries are not included in this source archive.
+API references: [Fabric 26.3 development notes](https://fabricmc.net/2026/06/15/262.html), [Loom](https://docs.fabricmc.net/develop/loom/), [Fabric game tests](https://docs.fabricmc.net/develop/automatic-testing), and the actual Mojang 26.3 server classes. Game and Fabric binaries are not included in this source archive.

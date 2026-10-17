@@ -1,4 +1,4 @@
-# Testing version 0.3.2
+# Testing version 0.3.3
 
 ## Automated checks
 
@@ -24,7 +24,7 @@ The regression suite exercises:
 
 These are headless tests with constructed fixtures and registered structure metadata, not a completed playtest on a full naturally generated Ocean Monument. Full-size terrain, guardians, player structures, and long-running performance still need in-game testing.
 
-`validation/gametest-results.xml` contains the final machine-generated report. The suite includes four custom tests and Minecraft's built-in always-pass control. Individual assertions are listed in `validation/passed-checks.txt`.
+`validation/gametest-results.xml` contains the final machine-generated report. The suite includes seven custom tests and Minecraft's built-in always-pass control. Individual assertions are listed in `validation/passed-checks.txt`.
 
 The compiled jar is produced directly from these checked Java classes and the mod resources. Gradle resolved Loom 1.18.2, but its Unix-domain socket capability probe fails with Operation not permitted in this environment, so the Gradle lifecycle itself did not complete here. The supplied Gradle project uses the Fabric 26.3 setup and pinned Loom version; it is intended for your normal Windows build environment. No Minecraft or Fabric dependency binaries are bundled in the deliverables.
 
@@ -50,4 +50,12 @@ For a bug report, include the job item, chat status, whether the chest is reacha
 
 The tree-farming GameTest covers assignment without tool wear, ordinary axes retaining clearing behavior, remembered planting species and sites across save/reload, repeated harvest/replant cycles, exact real-sapling consumption, no free saplings when supplies run out, full/missing storage pause and automatic resumption, original 2×2 dark oak footprints, waiting for a complete four-sapling batch, preserving an obstructed planting site, and cross-chunk birch replanting.
 
-For an in-game check, assign a wooden axe near a few trees and an open Copper Chest. Confirm wood and spare saplings accumulate, cleared tree bases receive matching saplings, and the worker harvests them again after normal growth. Use another axe to clear trees permanently.
+For an in-game check, assign a wooden axe near a few trees and an open Copper Chest. Confirm wood and spare saplings accumulate, cleared tree bases receive matching saplings, and the worker harvests them again after normal growth. Use another axe to clear trees permanently; netherite handles large trees.
+
+## Chest-supplied planting and low canopy regression
+
+Additional checks cover a fresh coarse-dirt platform with no trees or saved sites, planting different supplied species with exact inventory consumption, replacing an unavailable remembered species with a supplied alternative, and never creating supplies from an empty chest. A separate live test places a low leaf canopy one block above the ground and verifies that the golem walks underneath and harvests without a player breaking leaves. Approach clearance uses the actual Copper Golem bounding box.
+
+## Netherite mega-tree and stripped-log regression
+
+A constructed 320-log, 80-block-tall tree exercises discovery beyond the ordinary count and distance limits, persistent leaf recognition, saved survey and harvest progress, full-storage pause/resume, exact drops, and the 16-block harvest budget. Adjacent stripped logs and stripped wood remain intact for netherite, ordinary axes, and wooden-axe farmers. A log stripped after surveying also remains intact. This uses vanilla tagged blocks to model a mega tree; individual third-party tree mods have not been playtested. For an in-game check, use a netherite axe beside a modded mega tree, keep its chunks loaded, and check stripped structural blocks alongside it.

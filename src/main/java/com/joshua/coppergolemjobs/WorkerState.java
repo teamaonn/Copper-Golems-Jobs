@@ -33,6 +33,8 @@ public final class WorkerState {
     public BlockPos generator;
     public final DrainState drain = new DrainState();
     public final List<TreeFarmJob.Plot> treePlots = new ArrayList<>();
+    public int treeSeedCursor;
+    public final MegaTreeJob.State megaTree = new MegaTreeJob.State();
 
     public boolean inWorkChunk(BlockPos pos) {
         return (pos.getX() >> 4) == (origin.getX() >> 4)
@@ -50,6 +52,8 @@ public final class WorkerState {
         generator = null;
         drain.reset();
         treePlots.clear();
+        treeSeedCursor = 0;
+        megaTree.reset();
         clearTarget();
         status = job == Job.IDLE ? "Idle" : "Looking for a Copper Chest";
     }
@@ -80,6 +84,8 @@ public final class WorkerState {
         if (generator != null) out.putLong("CopperJobsGenerator", generator.asLong());
         drain.save(out);
         out.store("CopperJobsTreePlots", TreeFarmJob.Plot.CODEC.listOf(), treePlots);
+        out.putInt("CopperJobsTreeSeedCursor", treeSeedCursor);
+        megaTree.save(out);
     }
 
     public void load(ValueInput in) {
@@ -98,6 +104,8 @@ public final class WorkerState {
         drain.load(in);
         treePlots.clear();
         treePlots.addAll(in.read("CopperJobsTreePlots", TreeFarmJob.Plot.CODEC.listOf()).orElse(List.of()));
+        treeSeedCursor = Math.max(0, in.getIntOr("CopperJobsTreeSeedCursor", 0));
+        megaTree.load(in);
         status = job == Job.IDLE ? "Idle" : "Resuming " + job.label;
         clearTarget();
     }

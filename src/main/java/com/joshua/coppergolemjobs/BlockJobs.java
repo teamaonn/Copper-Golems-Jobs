@@ -153,11 +153,11 @@ public final class BlockJobs {
         return new BlockPos(x0, y, z0 + 60 - index);
     }
 
-    public static void work(ServerLevel level, CopperGolem golem, WorkerState worker, ChestStorage storage) {
+    public static boolean work(ServerLevel level, CopperGolem golem, WorkerState worker, ChestStorage storage) {
         BlockPos target = WorkerBrain.findBlock(level, golem, worker, p -> eligible(level, p, worker.job));
         if (target == null) { WorkerBrain.wait(golem, worker, worker.job == Job.TREE_FARM
-                ? "Waiting for tree growth, harvested saplings, or a reachable tree" : "No reachable work in assignment chunk"); return; }
-        if (!WorkerBrain.approach(level, golem, worker, target, !worker.job.trees())) return;
+                ? "Waiting for tree growth, harvested saplings, or a reachable tree" : "No reachable work in assignment chunk"); return false; }
+        if (!WorkerBrain.approach(level, golem, worker, target, !worker.job.trees())) return true;
         BlockState block = level.getBlockState(target);
         switch (worker.job) {
             case SHOVEL -> {
@@ -171,6 +171,7 @@ public final class BlockJobs {
             }
             default -> {}
         }
+        return true;
     }
 
     private static boolean eligible(ServerLevel level, BlockPos pos, Job job) {
@@ -178,7 +179,7 @@ public final class BlockJobs {
         if (block.hasBlockEntity() || block.getDestroySpeed(level, pos) < 0) return false;
         return switch (job) {
             case SHOVEL -> block.is(BlockTags.MINEABLE_WITH_SHOVEL) && !block.is(Blocks.FARMLAND);
-            case AXE, TREE_FARM -> block.is(BlockTags.LOGS) && !block.is(BlockTags.LEAVES);
+            case AXE, TREE_FARM -> TreeCutRules.cuttable(block);
             case STICK -> block.is(Blocks.COCOA) && block.getValue(CocoaBlock.AGE) == 2;
             case SHEARS -> block.is(Blocks.VINE) && level.getBlockState(pos.above()).is(Blocks.VINE)
                     && !level.getBlockState(pos.below()).is(Blocks.VINE);
@@ -239,7 +240,7 @@ public final class BlockJobs {
         queue.add(root);
         while (!queue.isEmpty() && logs.size() <= 256) {
             BlockPos p = queue.removeFirst();
-            if (!visited.add(p) || !WorkerBrain.loaded(level, p) || p.distSqr(worker.origin) > 4096 || !level.getBlockState(p).is(BlockTags.LOGS)) continue;
+            if (!visited.add(p) || !WorkerBrain.loaded(level, p) || p.distSqr(worker.origin) > 4096 || !TreeCutRules.cuttable(level.getBlockState(p))) continue;
             logs.add(p);
             for (BlockPos q : BlockPos.betweenClosed(p.offset(-1, -1, -1), p.offset(1, 1, 1))) if (!visited.contains(q)) queue.add(q.immutable());
         }

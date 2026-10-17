@@ -1,13 +1,13 @@
 {
   "minecraft": "26.3",
-  "mod": "0.3.2",
+  "mod": "0.3.3",
   "fabric_api": "0.160.6+26.3",
   "fabric_loader": "0.19.5",
   "java": 25,
   "compilation": "direct javac against official 26.3 server and matching Fabric API",
-  "checks_passed": 82,
-  "test_cases": 5,
+  "checks_passed": 99,
+  "test_cases": 8,
   "gradle": "Not rerun: unchanged Loom 1.18.2 socket probe is blocked in this environment; direct 26.3 compilation and headless tests pass",
   "server_bundle_sha1": "33680f5f2ac32864d6d7cf5e56a705fdb3e05f4c",
-  "jar_sha256": "2a743d7172fdf4bbcf0e605f5dd790af394b97aa0a8c7909267d5ac8e8ed246c"
+  "jar_sha256": "9de81cade2040f481e9638f7003eb3882cad7af4a66fd5505e9e3d16462e53d7"
 }

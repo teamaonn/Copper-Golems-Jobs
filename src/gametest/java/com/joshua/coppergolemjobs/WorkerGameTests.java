@@ -7,6 +7,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.util.ProblemReporter;
 import net.minecraft.world.Container;
 import net.minecraft.world.SimpleContainer;
@@ -406,6 +407,109 @@ public final class WorkerGameTests {
             for(int y=0;y<2;y++)level.setBlock(root.offset(x,y,z),log.defaultBlockState(),2);
             level.setBlock(root.offset(x,2,z),leaves.defaultBlockState().setValue(BlockStateProperties.PERSISTENT,false),2);
         }
+    }
+    @GameTest(maxTicks = 100, skyAccess = true)
+    public void chestSaplingsOnEmptyGround(GameTestHelper helper) {
+        ServerLevel level=helper.getLevel();BlockPos base=helper.absolutePos(new BlockPos(900,4,900));
+        for(int dx=-1;dx<=1;dx++)for(int dz=-1;dz<=1;dz++)level.getChunk((base.getX()>>4)+dx,(base.getZ()>>4)+dz);
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-12,-2,-12),base.offset(12,6,12)))
+            level.setBlock(p,p.getY()<base.getY()?Blocks.COARSE_DIRT.defaultBlockState():Blocks.AIR.defaultBlockState(),2);
+        CopperGolem g=EntityTypes.COPPER_GOLEM.create(level,net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+        g.setPos(Vec3.atBottomCenterOf(base));g.setNoAi(true);level.addFreshEntity(g);WorkerState s=((WorkerAccess)g).copperJobs$state();
+        s.assign(Job.TREE_FARM,base,Direction.NORTH);
+        BlockPos chestPos=base.offset(0,0,-3);Block copper=BuiltInRegistries.BLOCK.getValue(Identifier.withDefaultNamespace("copper_chest"));
+        level.setBlock(chestPos,copper.defaultBlockState(),3);Container chest=(Container)level.getBlockEntity(chestPos);
+        chest.setItem(0,new ItemStack(Items.OAK_SAPLING,3));chest.setItem(1,new ItemStack(Items.BIRCH_SAPLING,3));
+        step(level,g,s);
+        int oak=0,birch=0;
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-4,0,-4),base.offset(4,0,4)))if(level.getBlockState(p).is(Blocks.OAK_SAPLING))oak++;
+        check(oak==1&&count(chest,Items.OAK_SAPLING)==2,"chest saplings plant on fresh coarse dirt without any previous tree or remembered plot");
+        for(int n=0;n<20;n++) {
+            if(s.approach!=null)g.setPos(Vec3.atBottomCenterOf(s.approach));
+            step(level,g,s);
+            if(count(chest,Items.BIRCH_SAPLING)<3)break;
+        }
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-12,0,-12),base.offset(12,0,12)))if(level.getBlockState(p).is(Blocks.BIRCH_SAPLING))birch++;
+        check(birch==1&&count(chest,Items.BIRCH_SAPLING)==2,"fresh planting rotates through different sapling types supplied in storage");
+        check(!level.getBlockState(g.blockPosition()).is(BlockTags.SAPLINGS),"fresh planting does not put a sapling under the worker's feet");
+        g.setPos(Vec3.atBottomCenterOf(base));s.assign(Job.TREE_FARM,base,Direction.NORTH);chest.clearContent();
+        BlockPos remembered=base.east(2);level.setBlock(remembered,Blocks.AIR.defaultBlockState(),2);
+        s.treePlots.add(new TreeFarmJob.Plot(remembered,Identifier.withDefaultNamespace("oak_sapling"),1));
+        chest.setItem(0,new ItemStack(Items.CHERRY_SAPLING,2));step(level,g,s);
+        check(level.getBlockState(remembered).is(Blocks.CHERRY_SAPLING)&&count(chest,Items.CHERRY_SAPLING)==1,
+            "a remembered site can use a different supplied sapling when its original species is unavailable");
+        chest.clearContent();s.assign(Job.TREE_FARM,base,Direction.NORTH);step(level,g,s);
+        check(s.treePlots.isEmpty()&&chest.isEmpty(),"empty storage never creates new planting supplies");
+        g.discard();helper.succeed();
+    }
+
+    @GameTest(maxTicks = 1500, skyAccess = true, padding = 32)
+    public void treeUnderLowLeaves(GameTestHelper helper) {
+        ServerLevel level=helper.getLevel();BlockPos base=helper.absolutePos(new BlockPos(3,4,3));
+        var forced=new java.util.ArrayList<net.minecraft.world.level.ChunkPos>();
+        for(int dx=-1;dx<=1;dx++)for(int dz=-1;dz<=1;dz++){
+            var c=new net.minecraft.world.level.ChunkPos((base.getX()>>4)+dx,(base.getZ()>>4)+dz);
+            if(level.getChunkSource().updateChunkForced(c,true))forced.add(c);level.getChunk(c.x(),c.z());
+        }
+        helper.runBeforeTestEnd(()->forced.forEach(c->level.getChunkSource().updateChunkForced(c,false)));
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-2,-2,-4),base.offset(9,5,4)))
+            level.setBlock(p,p.getY()<base.getY()?Blocks.COARSE_DIRT.defaultBlockState():Blocks.AIR.defaultBlockState(),2);
+        BlockPos root=base.east(6);
+        for(int y=0;y<4;y++)level.setBlock(root.above(y),Blocks.OAK_LOG.defaultBlockState(),2);
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(2,1,-2),base.offset(8,1,2)))
+            if(p.getX()!=root.getX()||p.getZ()!=root.getZ())level.setBlock(p,Blocks.OAK_LEAVES.defaultBlockState()
+                .setValue(BlockStateProperties.PERSISTENT,false).setValue(BlockStateProperties.DISTANCE,1),2);
+        BlockPos chestPos=base.offset(-1,0,-2);level.setBlock(chestPos,BuiltInRegistries.BLOCK.getValue(Identifier.withDefaultNamespace("copper_chest")).defaultBlockState(),3);
+        Container chest=(Container)level.getBlockEntity(chestPos);
+        CopperGolem g=EntityTypes.COPPER_GOLEM.create(level,net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+        g.setPos(Vec3.atBottomCenterOf(base));level.addFreshEntity(g);WorkerState s=((WorkerAccess)g).copperJobs$state();s.assign(Job.TREE_FARM,base,Direction.EAST);
+        check(WorkerBrain.standable(level,g,root.west()),"copper golem fits in the one-block space beneath low leaves");
+        helper.onEachTick(()->{
+            if(count(chest,Items.OAK_LOG)==4){
+                check(g.getX()>base.getX()+2,"live tree farmer approaches and harvests under a low canopy without a player breaking leaves");
+                g.discard();helper.succeed();
+            }
+        });
+    }
+    @GameTest(maxTicks = 100, skyAccess = true)
+    public void megaTreesAndStrippedProtection(GameTestHelper helper) {
+        ServerLevel level=helper.getLevel();BlockPos base=helper.absolutePos(new BlockPos(1200,5,1200));
+        for(int dx=-1;dx<=1;dx++)for(int dz=-1;dz<=1;dz++)level.getChunk((base.getX()>>4)+dx,(base.getZ()>>4)+dz);
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-4,-2,-4),base.offset(7,82,7)))
+            level.setBlock(p,p.getY()<base.getY()?Blocks.DIRT.defaultBlockState():Blocks.AIR.defaultBlockState(),2);
+        CopperGolem g=EntityTypes.COPPER_GOLEM.create(level,net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+        g.setPos(Vec3.atBottomCenterOf(base));g.setNoAi(true);level.addFreshEntity(g);
+        WorkerState s=((WorkerAccess)g).copperJobs$state();
+        BlockPos chestPos=base.offset(-2,0,-2);level.setBlock(chestPos,BuiltInRegistries.BLOCK.getValue(Identifier.withDefaultNamespace("copper_chest")).defaultBlockState(),3);
+        Container chest=(Container)level.getBlockEntity(chestPos);BlockPos root=base.east(2);
+        check(Job.of(new ItemStack(Items.NETHERITE_AXE))==Job.MEGA_AXE,"netherite axe selects the unlimited-size tree cutter");
+        for(int x=0;x<2;x++)for(int z=0;z<2;z++)for(int y=0;y<80;y++)level.setBlock(root.offset(x,y,z),Blocks.OAK_LOG.defaultBlockState(),2);
+        level.setBlock(root.above(80),Blocks.OAK_LEAVES.defaultBlockState().setValue(BlockStateProperties.PERSISTENT,true),2);
+        BlockPos stripped=root.north(),wood=root.east(2);
+        level.setBlock(stripped,Blocks.STRIPPED_OAK_LOG.defaultBlockState(),2);level.setBlock(wood,Blocks.STRIPPED_OAK_WOOD.defaultBlockState(),2);
+        s.assign(Job.MEGA_AXE,base,Direction.EAST);step(level,g,s);
+        check(s.megaTree.phase==MegaTreeJob.Phase.LOGS&&s.megaTree.logs.size()<=128&&level.getBlockState(root).is(Blocks.OAK_LOG),"mega-tree discovery is budgeted and does not break the entire tree in one tick");
+        var out=TagValueOutput.createWithContext(ProblemReporter.DISCARDING,level.registryAccess());s.save(out);
+        int discovered=s.megaTree.logs.size();s.load(TagValueInput.create(ProblemReporter.DISCARDING,level.registryAccess(),out.buildResult()));
+        check(s.megaTree.phase==MegaTreeJob.Phase.LOGS&&s.megaTree.logs.size()==discovered&&!s.megaTree.frontier.isEmpty(),"large-tree frontier and progress survive save/reload");
+        for(int n=0;n<100&&s.megaTree.phase!=MegaTreeJob.Phase.HARVEST;n++)step(level,g,s);
+        check(s.megaTree.phase==MegaTreeJob.Phase.HARVEST&&s.megaTree.logs.size()==320,"large-tree survey follows all 320 logs including those above the old 64-block range");
+        // Protect a previously surveyed log by stripping it before the cutter reaches it.
+        BlockPos changed=root.above(79);level.setBlock(changed,Blocks.STRIPPED_OAK_LOG.defaultBlockState(),2);
+        for(int n=0;n<chest.getContainerSize();n++)chest.setItem(n,new ItemStack(Items.DIRT,64));
+        step(level,g,s);check(s.megaTree.index==0&&level.getBlockState(root).is(Blocks.OAK_LOG),"full storage pauses a surveyed mega tree before harvesting");
+        chest.clearContent();step(level,g,s);
+        check(s.megaTree.index<=16&&count(chest,Items.OAK_LOG)<=16,"mega-tree harvesting respects the 16-block per-work-tick budget");
+        out=TagValueOutput.createWithContext(ProblemReporter.DISCARDING,level.registryAccess());s.save(out);
+        s.load(TagValueInput.create(ProblemReporter.DISCARDING,level.registryAccess(),out.buildResult()));
+        for(int n=0;n<40&&s.megaTree.phase!=MegaTreeJob.Phase.IDLE;n++)step(level,g,s);
+        check(s.megaTree.phase==MegaTreeJob.Phase.IDLE&&count(chest,Items.OAK_LOG)==319&&level.getBlockState(root.offset(1,79,1)).isAir(),"mega cutter finishes beyond 256 logs with exact drops after harvest save/reload");
+        check(level.getBlockState(stripped).is(Blocks.STRIPPED_OAK_LOG)&&level.getBlockState(wood).is(Blocks.STRIPPED_OAK_WOOD)&&level.getBlockState(changed).is(Blocks.STRIPPED_OAK_LOG),"netherite cutter preserves stripped logs, stripped wood and logs stripped mid-job");
+        for(Job job:List.of(Job.AXE,Job.TREE_FARM)) {
+            s.assign(job,base,Direction.EAST);testTree(level,root,Blocks.OAK_LOG,Blocks.OAK_LEAVES,1);step(level,g,s);
+            check(level.getBlockState(root).isAir()&&level.getBlockState(stripped).is(Blocks.STRIPPED_OAK_LOG)&&level.getBlockState(wood).is(Blocks.STRIPPED_OAK_WOOD),job+" skips stripped structure blocks while harvesting adjacent trees");
+        }
+        g.discard();helper.succeed();
     }
     private static void checkQuiet(boolean pass,String description) { if(!pass)throw new IllegalStateException(description); }
 

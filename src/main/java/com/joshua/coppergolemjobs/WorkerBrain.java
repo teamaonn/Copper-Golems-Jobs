@@ -38,6 +38,7 @@ public final class WorkerBrain {
             case GENERATOR -> GeneratorJob.work(level, golem, state, storage);
             case DRAIN -> DrainJobs.work(level, golem, state, storage);
             case TREE_FARM -> TreeFarmJob.work(level, golem, state, storage);
+            case MEGA_AXE -> MegaTreeJob.work(level, golem, state, storage);
             case PICKAXE -> BlockJobs.quarry(level, golem, state, storage);
             case SPEAR -> BlockJobs.tunnel(level, golem, state, storage);
             case SHOVEL, AXE, HOE, STICK -> BlockJobs.work(level, golem, state, storage);
@@ -89,8 +90,7 @@ public final class WorkerBrain {
         return !floor.is(Blocks.MAGMA_BLOCK)
                 && !floor.getCollisionShape(level, pos.below()).isEmpty()
                 && floor.getCollisionShape(level, pos.below()).max(Direction.Axis.Y) >= .875
-                && level.getBlockState(pos).getCollisionShape(level, pos).isEmpty()
-                && level.getBlockState(pos.above()).getCollisionShape(level, pos.above()).isEmpty()
+                && level.noCollision(golem, golem.getBoundingBox().move(Vec3.atBottomCenterOf(pos).subtract(golem.position())))
                 && level.getFluidState(pos).isEmpty() && level.getFluidState(pos.below()).isEmpty();
     }
 

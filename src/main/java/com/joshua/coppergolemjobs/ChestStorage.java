@@ -57,6 +57,17 @@ public final class ChestStorage {
 
     public Transaction plan() { return new Transaction(containers); }
 
+    public List<net.minecraft.world.item.BlockItem> treeSupplies() {
+        var result = new java.util.LinkedHashSet<net.minecraft.world.item.BlockItem>();
+        for (Container c : containers) for (int n = 0; n < c.getContainerSize(); n++) {
+            ItemStack stack = c.getItem(n);
+            if (!stack.isEmpty() && stack.getItem() instanceof net.minecraft.world.item.BlockItem item
+                    && (item.getBlock() instanceof net.minecraft.world.level.block.SaplingBlock
+                    || item.getBlock() instanceof net.minecraft.world.level.block.AzaleaBlock)) result.add(item);
+        }
+        return List.copyOf(result);
+    }
+
     public static final class Transaction {
         private record Slot(Container container, int index, ItemStack original) {}
         private final List<Slot> slots = new ArrayList<>();

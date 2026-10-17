@@ -60,6 +60,22 @@ monument blocks and interior water remain untouched
 drain returns home and cleans temporary footholds
 drain swimming control raises the golem through exterior water
 pausing drain movement restores gravity
+wooden axe selects tree farming without consuming or wearing the tool
+other axes retain the clearing job
+tree farmer harvests wood and remembers the cleared planting site
+tree planting site and species survive save/reload
+replanting spends exactly one real sapling and keeps the spares in storage
+tree farmer harvests regrowth and replants without reassignment
+full Copper Chest pauses tree replanting without losing the site
+tree farmer waits for real saplings instead of creating free ones
+missing Copper Chest also pauses the tree farmer
+tree farmer resumes automatically when storage and saplings return
+clearing axes never replant or spend saplings
+dark oak records its original 2x2 footprint as one planting site
+2x2 replanting waits for all four saplings without spending a partial batch
+replanting preserves an obstructed site and its sapling supply
+2x2 planting consumes exactly four saplings and completes the site
+wooden axe harvests and replants matching species across the assignment chunk border
 live AI builds across a gap, resumes digging, and deposits its drop
 live drain walks, swims, finishes and returns home without test teleports
 live drain keeps sealed interior water intact through fluid ticks

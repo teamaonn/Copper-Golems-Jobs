@@ -1,12 +1,12 @@
-# Copper Golem Jobs — Fabric 26.3 — 0.3.1 test build
+# Copper Golem Jobs — Fabric 26.3 — 0.3.2 test build
 
 Give a vanilla Copper Golem a job by right-clicking it with a vanilla tool. No fuel, power source, hearts, upgrades, or tool durability costs.
 
-[Download the 0.3.1 test jar](dist/copper-golem-jobs-fabric-26.3-0.3.1.jar).
+[Download the 0.3.2 test jar](dist/copper-golem-jobs-fabric-26.3-0.3.2.jar).
 
 ## Install
 
-Use Minecraft Java **26.3**, Fabric Loader **0.19.5 or newer**, and Fabric API **0.160.6+26.3**. Put `copper-golem-jobs-fabric-26.3-0.3.1.jar` into `mods` alongside Fabric API. Remove the earlier `copper-golems` test mod before installing this restart; the two mods deliberately cannot load together.
+Use Minecraft Java **26.3**, Fabric Loader **0.19.5 or newer**, and Fabric API **0.160.6+26.3**. Put `copper-golem-jobs-fabric-26.3-0.3.2.jar` into `mods` alongside Fabric API. Remove the earlier `copper-golems` test mod before installing this restart; the two mods deliberately cannot load together.
 
 The mod uses vanilla mobs, items, blocks, and visuals. The jar works in single-player and on a Fabric server. Begin in a separate Creative test world because several jobs excavate terrain automatically.
 
@@ -26,6 +26,16 @@ The mod uses vanilla mobs, items, blocks, and visuals. The jar works in single-p
 3. Provide Copper Chest storage. It mines the marked position and waits for stone/cobblestone to reappear. It never switches to neighboring blocks or replaces the generator's lava/water with glass.
 
 Re-marking changes the target. The marked position survives save/reload. Wooden pickaxes no longer start the full-chunk quarry; use another pickaxe for that job.
+
+## Tree farmer setup
+
+Give the golem a **wooden axe** near your trees, with open Copper Chest storage within 64 blocks. It uses the same tree search area as other axes: its assignment chunk and the eight neighboring chunks, following connected trees within the existing 64-block work range.
+
+After harvesting, it remembers each cleared tree base and uses matching saplings from Copper Chest storage to replant. Spare saplings, wood, sticks, and other tree drops stay in storage. It can harvest the resulting trees again without reassignment. No saplings are created, no bone meal is supplied, and normal vanilla growth requirements still apply. You can add matching saplings to the Copper Chest to start or replenish its supply.
+
+Dark oak and pale oak use four saplings in a 2×2 planting site. Existing giant spruce/jungle footprints are also replanted as 2×2 groups. A group waits until all four saplings and all four planting spaces are available. Existing blocks and player-planted saplings are preserved. Waiting planting sites and their species survive save/reload. Missing/full Copper Chests pause the job, just as they do other workers.
+
+**Other axes continue clearing trees without replanting.** Changing a tree farmer's job resets its remembered planting sites, like other ordinary job assignments.
 
 ## Monument drain setup
 
@@ -57,7 +67,8 @@ Block and harvest output is checked as a complete batch before anything is broke
 | Loyalty III trident | Exterior Ocean Monument drain crew. Supplies temporary sand and permanent glass, collects kelp/seagrass, leaves monument blocks and interior rooms alone, then returns home. |
 | Other pickaxes | Quarries the assigned 16×16 chunk one layer at a time, descending toward bedrock on a cobblestone staircase it builds automatically. Block drops use a Netherite pickaxe with Silk Touch. |
 | Shovel | Removes reachable shovel-mineable blocks in the assignment chunk: dirt, sand, gravel, clay, snow, and similar blocks. Respects accessibility and retries as the terrain changes. |
-| Axe | Searches the assignment chunk and all eight neighboring chunks. It can cross chunk borders and follows connected tree logs up to 64 blocks from its assignment point. Deposits normal log and leaf drops. Log clusters without natural leaves are skipped. |
+| Wooden axe | Harvests trees and replants matching saplings at cleared bases using supplies from Copper Chests. Remembers 2×2 planting sites and waits for natural regrowth. |
+| Other axes | Searches the assignment chunk and all eight neighboring chunks. It can cross chunk borders and follows connected tree logs up to 64 blocks from its assignment point. Deposits normal log and leaf drops. Log clusters without natural leaves are skipped. |
 | Fishing rod | Works at reachable source water in the assignment chunk. Uses vanilla fishing loot, including biome and open-water checks. Catches repeat after 10–30 seconds. A splash marks each catch; there is no persistent cast-line animation. |
 | Spear | Clears a 3×3 horizontal tunnel in its assigned facing. Never generates or loads the next chunk itself; “unknown” means not currently loaded. It bridges gaps with cobblestone and stops before unloaded terrain or when storage is unavailable. |
 | Hoe | Tills clear dirt, grass, dirt path, coarse dirt, or rooted dirt whether or not water is nearby. Plants and harvests wheat, carrots, potatoes, and beetroot. Replants from the harvest first, then chest supplies. Does not force crops to grow faster. |
@@ -84,7 +95,7 @@ C:\Gradle\bin\gradle.bat build
 
 Use **JDK 25** and **Gradle 9.5.1 or newer compatible with Loom 1.17**. The project pins **Loom 1.17.20**, uses the unobfuscated Minecraft 26.3 names, and does not use Yarn mappings. Gradle downloads the dependencies on the first build.
 
-The installable output is `build/libs/copper-golem-jobs-fabric-26.3-0.3.1.jar`. The `-sources.jar` is source code for developers, not the mod to install.
+The installable output is `build/libs/copper-golem-jobs-fabric-26.3-0.3.2.jar`. The `-sources.jar` is source code for developers, not the mod to install.
 
 Optional headless game tests:
 

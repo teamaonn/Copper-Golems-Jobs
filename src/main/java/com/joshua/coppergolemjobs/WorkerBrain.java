@@ -37,6 +37,7 @@ public final class WorkerBrain {
         switch (state.job) {
             case GENERATOR -> GeneratorJob.work(level, golem, state, storage);
             case DRAIN -> DrainJobs.work(level, golem, state, storage);
+            case TREE_FARM -> TreeFarmJob.work(level, golem, state, storage);
             case PICKAXE -> BlockJobs.quarry(level, golem, state, storage);
             case SPEAR -> BlockJobs.tunnel(level, golem, state, storage);
             case SHOVEL, AXE, HOE, STICK -> BlockJobs.work(level, golem, state, storage);
@@ -201,10 +202,10 @@ public final class WorkerBrain {
         int chunkX = (state.origin.getX() >> 4) << 4;
         int chunkZ = (state.origin.getZ() >> 4) << 4;
         // Axes may leave the assignment chunk to reach neighboring trees.
-        int x0 = state.job == Job.AXE ? chunkX - 16 : chunkX;
-        int z0 = state.job == Job.AXE ? chunkZ - 16 : chunkZ;
-        int x1 = state.job == Job.AXE ? chunkX + 31 : chunkX + 15;
-        int z1 = state.job == Job.AXE ? chunkZ + 31 : chunkZ + 15;
+        int x0 = state.job.trees() ? chunkX - 16 : chunkX;
+        int z0 = state.job.trees() ? chunkZ - 16 : chunkZ;
+        int x1 = state.job.trees() ? chunkX + 31 : chunkX + 15;
+        int z1 = state.job.trees() ? chunkZ + 31 : chunkZ + 15;
         if (!loaded(level, state.origin)) return null;
         for (BlockPos p : BlockPos.betweenClosed(x0, Math.max(level.getMinY(), golem.blockPosition().getY() - 6), z0,
                 x1, Math.min(level.getMaxY(), golem.blockPosition().getY() + 12), z1)) {
@@ -215,7 +216,7 @@ public final class WorkerBrain {
         for (BlockPos p : candidates) {
             if (inReach(level, golem, p)) { state.target = p; return p; }
             if (attempts++ >= 64) break;
-            approach(level, golem, state, p, state.job != Job.AXE);
+            approach(level, golem, state, p, !state.job.trees());
             if (state.approach != null) return p;
         }
         state.cooldown = 20;

@@ -6,7 +6,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
 public enum Job {
-    IDLE("Idle"), GENERATOR("Generator mining"), DRAIN("Monument drain crew"), PICKAXE("Mining"), SHOVEL("Excavating"), AXE("Tree cutting"),
+    IDLE("Idle"), GENERATOR("Generator mining"), DRAIN("Monument drain crew"), TREE_FARM("Tree farming"), PICKAXE("Mining"), SHOVEL("Excavating"), AXE("Tree cutting"),
     FISHING_ROD("Fishing"), SPEAR("3x3 tunneling"), HOE("Farming"),
     SWORD("Hostile mob fighting"), STICK("Cocoa farming"), BUCKET("Milking"), SHEARS("Shearing");
 
@@ -16,6 +16,7 @@ public enum Job {
     public static Job of(ItemStack stack) {
         if (stack.isEmpty()) return IDLE;
         if (stack.is(Items.WOODEN_PICKAXE)) return GENERATOR;
+        if (stack.is(Items.WOODEN_AXE)) return TREE_FARM;
         if (stack.is(ItemTags.PICKAXES)) return PICKAXE;
         if (stack.is(ItemTags.SHOVELS)) return SHOVEL;
         if (stack.is(ItemTags.AXES)) return AXE;
@@ -25,8 +26,10 @@ public enum Job {
         if (stack.is(Items.STICK)) return STICK;
         if (stack.is(Items.BUCKET)) return BUCKET;
         if (stack.is(Items.SHEARS)) return SHEARS;
-        // Vanilla 26.2 spears, including copper. Also recognizes matching modded spears.
+        // Vanilla spears, including copper. Also recognizes matching modded spears.
         if (BuiltInRegistries.ITEM.getKey(stack.getItem()).getPath().endsWith("_spear")) return SPEAR;
         return null;
     }
+
+    public boolean trees() { return this == AXE || this == TREE_FARM; }
 }

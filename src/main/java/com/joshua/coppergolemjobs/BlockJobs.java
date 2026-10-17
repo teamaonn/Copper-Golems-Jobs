@@ -155,14 +155,15 @@ public final class BlockJobs {
 
     public static void work(ServerLevel level, CopperGolem golem, WorkerState worker, ChestStorage storage) {
         BlockPos target = WorkerBrain.findBlock(level, golem, worker, p -> eligible(level, p, worker.job));
-        if (target == null) { WorkerBrain.wait(golem, worker, "No reachable work in assignment chunk"); return; }
-        if (!WorkerBrain.approach(level, golem, worker, target, true)) return;
+        if (target == null) { WorkerBrain.wait(golem, worker, worker.job == Job.TREE_FARM
+                ? "Waiting for tree growth, harvested saplings, or a reachable tree" : "No reachable work in assignment chunk"); return; }
+        if (!WorkerBrain.approach(level, golem, worker, target, !worker.job.trees())) return;
         BlockState block = level.getBlockState(target);
         switch (worker.job) {
             case SHOVEL -> {
                 if (breakIntoChest(level, golem, worker, storage, List.of(target), new ItemStack(Items.NETHERITE_SHOVEL), true)) WorkerBrain.worked(golem, worker, 10);
             }
-            case AXE -> fellTree(level, golem, worker, storage, target);
+            case AXE, TREE_FARM -> fellTree(level, golem, worker, storage, target);
             case HOE -> farm(level, golem, worker, storage, target, block);
             case STICK -> cocoa(level, golem, worker, storage, target, block);
             case SHEARS -> {
@@ -177,7 +178,7 @@ public final class BlockJobs {
         if (block.hasBlockEntity() || block.getDestroySpeed(level, pos) < 0) return false;
         return switch (job) {
             case SHOVEL -> block.is(BlockTags.MINEABLE_WITH_SHOVEL) && !block.is(Blocks.FARMLAND);
-            case AXE -> block.is(BlockTags.LOGS) && !block.is(BlockTags.LEAVES);
+            case AXE, TREE_FARM -> block.is(BlockTags.LOGS) && !block.is(BlockTags.LEAVES);
             case STICK -> block.is(Blocks.COCOA) && block.getValue(CocoaBlock.AGE) == 2;
             case SHEARS -> block.is(Blocks.VINE) && level.getBlockState(pos.above()).is(Blocks.VINE)
                     && !level.getBlockState(pos.below()).is(Blocks.VINE);
@@ -252,7 +253,11 @@ public final class BlockJobs {
         if (leaves.isEmpty()) { WorkerBrain.wait(golem, worker, "Log cluster has no natural leaves; waiting"); worker.cooldown = 20; for (BlockPos p : logs) worker.skipped.put(p, level.getGameTime() + 1200); worker.clearTarget(); return; }
         List<BlockPos> tree = new ArrayList<>(leaves);
         tree.addAll(logs);
-        if (breakIntoChest(level, golem, worker, storage, tree, new ItemStack(Items.NETHERITE_AXE), false)) WorkerBrain.worked(golem, worker, 40);
+        List<TreeFarmJob.Plot> plots = worker.job == Job.TREE_FARM ? TreeFarmJob.plots(level, logs, leaves) : List.of();
+        if (breakIntoChest(level, golem, worker, storage, tree, new ItemStack(Items.NETHERITE_AXE), false)) {
+            for (TreeFarmJob.Plot plot : plots) if (!worker.treePlots.contains(plot)) worker.treePlots.add(plot);
+            WorkerBrain.worked(golem, worker, 40);
+        }
     }
 
     private static void farm(ServerLevel level, CopperGolem golem, WorkerState worker, ChestStorage storage, BlockPos pos, BlockState block) {

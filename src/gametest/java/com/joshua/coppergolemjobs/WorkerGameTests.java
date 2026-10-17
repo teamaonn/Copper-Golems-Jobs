@@ -338,6 +338,75 @@ public final class WorkerGameTests {
             }
         });
     }
+    @GameTest(maxTicks = 100, skyAccess = true)
+    public void woodenAxeTreeFarm(GameTestHelper helper) {
+        ServerLevel level=helper.getLevel();
+        BlockPos ref=helper.absolutePos(new BlockPos(640,5,640));
+        BlockPos base=new BlockPos((ref.getX()>>4)*16+5,ref.getY(),(ref.getZ()>>4)*16+5);
+        for(int dx=-1;dx<=1;dx++)for(int dz=-1;dz<=1;dz++)level.getChunk((base.getX()>>4)+dx,(base.getZ()>>4)+dz);
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-4,-2,-4),base.offset(10,5,10)))
+            level.setBlock(p,p.getY()<base.getY()?Blocks.DIRT.defaultBlockState():Blocks.AIR.defaultBlockState(),2);
+        CopperGolem g=EntityTypes.COPPER_GOLEM.create(level,net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+        g.setPos(Vec3.atBottomCenterOf(base));g.setNoAi(true);level.addFreshEntity(g);
+        WorkerState worker=((WorkerAccess)g).copperJobs$state();
+        BlockPos chestPos=base.offset(-2,0,-2);
+        Block copper=BuiltInRegistries.BLOCK.getValue(Identifier.withDefaultNamespace("copper_chest"));
+        level.setBlock(chestPos,copper.defaultBlockState(),3);Container chest=(Container)level.getBlockEntity(chestPos);
+        chest.setItem(0,new ItemStack(Items.OAK_SAPLING,3));
+        var player=helper.makeMockPlayer(net.minecraft.world.level.GameType.SURVIVAL);
+        ItemStack axe=new ItemStack(Items.WOODEN_AXE);axe.setDamageValue(3);
+        player.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND,axe);
+        net.fabricmc.fabric.api.event.player.UseEntityCallback.EVENT.invoker().interact(player,level,net.minecraft.world.InteractionHand.MAIN_HAND,g,null);
+        check(worker.job==Job.TREE_FARM&&axe.getCount()==1&&axe.getDamageValue()==3,"wooden axe selects tree farming without consuming or wearing the tool");
+        check(Job.of(new ItemStack(Items.IRON_AXE))==Job.AXE,"other axes retain the clearing job");
+        BlockPos root=base.east(2);testTree(level,root,Blocks.OAK_LOG,Blocks.OAK_LEAVES,1);
+        step(level,g,worker);
+        check(level.getBlockState(root).isAir()&&count(chest,Items.OAK_LOG)==2&&worker.treePlots.size()==1,"tree farmer harvests wood and remembers the cleared planting site");
+        var out=TagValueOutput.createWithContext(ProblemReporter.DISCARDING,level.registryAccess());worker.save(out);
+        worker.load(TagValueInput.create(ProblemReporter.DISCARDING,level.registryAccess(),out.buildResult()));
+        check(worker.job==Job.TREE_FARM&&worker.treePlots.getFirst().pos().equals(root)
+            &&worker.treePlots.getFirst().sapling().equals(Identifier.withDefaultNamespace("oak_sapling")),"tree planting site and species survive save/reload");
+        int before=count(chest,Items.OAK_SAPLING);step(level,g,worker);
+        check(level.getBlockState(root).is(Blocks.OAK_SAPLING)&&count(chest,Items.OAK_SAPLING)==before-1&&worker.treePlots.isEmpty(),"replanting spends exactly one real sapling and keeps the spares in storage");
+        testTree(level,root,Blocks.OAK_LOG,Blocks.OAK_LEAVES,1);step(level,g,worker);step(level,g,worker);
+        check(level.getBlockState(root).is(Blocks.OAK_SAPLING)&&count(chest,Items.OAK_LOG)==4,"tree farmer harvests regrowth and replants without reassignment");
+        testTree(level,root,Blocks.OAK_LOG,Blocks.OAK_LEAVES,1);step(level,g,worker);
+        for(int n=0;n<chest.getContainerSize();n++)chest.setItem(n,new ItemStack(Items.DIRT,64));
+        step(level,g,worker);check(level.getBlockState(root).isAir()&&worker.treePlots.size()==1,"full Copper Chest pauses tree replanting without losing the site");
+        chest.clearContent();step(level,g,worker);
+        check(level.getBlockState(root).isAir()&&worker.treePlots.size()==1,"tree farmer waits for real saplings instead of creating free ones");
+        level.setBlock(chestPos,Blocks.AIR.defaultBlockState(),3);step(level,g,worker);
+        check(level.getBlockState(root).isAir()&&worker.status.contains("No Copper Chest"),"missing Copper Chest also pauses the tree farmer");
+        level.setBlock(chestPos,copper.defaultBlockState(),3);chest=(Container)level.getBlockEntity(chestPos);
+        chest.setItem(0,new ItemStack(Items.OAK_SAPLING,2));step(level,g,worker);
+        check(level.getBlockState(root).is(Blocks.OAK_SAPLING),"tree farmer resumes automatically when storage and saplings return");
+        worker.assign(Job.AXE,base,Direction.NORTH);testTree(level,root,Blocks.OAK_LOG,Blocks.OAK_LEAVES,1);step(level,g,worker);
+        before=count(chest,Items.OAK_SAPLING);step(level,g,worker);
+        check(level.getBlockState(root).isAir()&&worker.treePlots.isEmpty()&&count(chest,Items.OAK_SAPLING)==before,"clearing axes never replant or spend saplings");
+        BlockPos giant=base.south(4);g.setPos(Vec3.atBottomCenterOf(giant.west(2)));
+        worker.assign(Job.TREE_FARM,base,Direction.NORTH);chest.clearContent();
+        testTree(level,giant,Blocks.DARK_OAK_LOG,Blocks.DARK_OAK_LEAVES,2);step(level,g,worker);
+        check(worker.treePlots.size()==1&&worker.treePlots.getFirst().size()==2&&worker.treePlots.getFirst().pos().equals(giant),"dark oak records its original 2x2 footprint as one planting site");
+        chest.clearContent();chest.setItem(0,new ItemStack(Items.DARK_OAK_SAPLING,3));step(level,g,worker);
+        check(count(chest,Items.DARK_OAK_SAPLING)==3&&level.getBlockState(giant).isAir(),"2x2 replanting waits for all four saplings without spending a partial batch");
+        chest.setItem(0,new ItemStack(Items.DARK_OAK_SAPLING,4));level.setBlock(giant.east().south(),Blocks.STONE.defaultBlockState(),3);step(level,g,worker);
+        check(level.getBlockState(giant.east().south()).is(Blocks.STONE)&&count(chest,Items.DARK_OAK_SAPLING)==4,"replanting preserves an obstructed site and its sapling supply");
+        level.setBlock(giant.east().south(),Blocks.AIR.defaultBlockState(),3);step(level,g,worker);
+        for(int x=0;x<2;x++)for(int z=0;z<2;z++)checkQuiet(level.getBlockState(giant.offset(x,0,z)).is(Blocks.DARK_OAK_SAPLING),"all four dark oak saplings must be planted");
+        check(count(chest,Items.DARK_OAK_SAPLING)==0&&worker.treePlots.isEmpty(),"2x2 planting consumes exactly four saplings and completes the site");
+        BlockPos border=new BlockPos(((base.getX()>>4)+1)*16,base.getY(),base.getZ());
+        level.setBlock(border.below(),Blocks.DIRT.defaultBlockState(),3);testTree(level,border,Blocks.BIRCH_LOG,Blocks.BIRCH_LEAVES,1);
+        g.setPos(Vec3.atBottomCenterOf(border.west(2)));worker.assign(Job.TREE_FARM,base,Direction.NORTH);chest.clearContent();
+        chest.setItem(0,new ItemStack(Items.BIRCH_SAPLING,2));step(level,g,worker);step(level,g,worker);
+        check(level.getBlockState(border).is(Blocks.BIRCH_SAPLING)&&count(chest,Items.BIRCH_LOG)==2,"wooden axe harvests and replants matching species across the assignment chunk border");
+        g.discard();helper.succeed();
+    }
+    private static void testTree(ServerLevel level,BlockPos root,Block log,Block leaves,int size) {
+        for(int x=0;x<size;x++)for(int z=0;z<size;z++) {
+            for(int y=0;y<2;y++)level.setBlock(root.offset(x,y,z),log.defaultBlockState(),2);
+            level.setBlock(root.offset(x,2,z),leaves.defaultBlockState().setValue(BlockStateProperties.PERSISTENT,false),2);
+        }
+    }
     private static void checkQuiet(boolean pass,String description) { if(!pass)throw new IllegalStateException(description); }
 
 }

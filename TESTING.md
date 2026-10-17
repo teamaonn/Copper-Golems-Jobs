@@ -1,4 +1,4 @@
-# Testing version 0.3.1
+# Testing version 0.3.2
 
 ## Automated checks
 
@@ -24,7 +24,7 @@ The regression suite exercises:
 
 These are headless tests with constructed fixtures and registered structure metadata, not a completed playtest on a full naturally generated Ocean Monument. Full-size terrain, guardians, player structures, and long-running performance still need in-game testing.
 
-`validation/gametest-results.xml` contains the final machine-generated report. The suite includes three custom tests and Minecraft's built-in always-pass control. Individual assertions are listed in `validation/passed-checks.txt`.
+`validation/gametest-results.xml` contains the final machine-generated report. The suite includes four custom tests and Minecraft's built-in always-pass control. Individual assertions are listed in `validation/passed-checks.txt`.
 
 The compiled jar is produced directly from these checked Java classes and the mod resources. Gradle resolved Loom 1.18.2, but its Unix-domain socket capability probe fails with Operation not permitted in this environment, so the Gradle lifecycle itself did not complete here. The supplied Gradle project uses the Fabric 26.3 setup and pinned Loom version; it is intended for your normal Windows build environment. No Minecraft or Fabric dependency binaries are bundled in the deliverables.
 
@@ -45,3 +45,9 @@ For a bug report, include the job item, chat status, whether the chest is reacha
 - For the drain crew, use a naturally generated monument. Put the golem on a solid block at the ocean surface directly above it, provide a Loyalty III trident and Copper Chests, and keep it within simulation distance. Confirm exterior vegetation is collected, sand surrounds/covers the exterior, glass walls stay, and temporary sand is removed with no drops.
 - Pause with an empty-hand click, save/reload, and give it a Loyalty III trident again to resume. Check progress with sneak + empty-hand right-click.
 - Confirm the monument and its interior rooms remain untouched. Work stops at the top existing solid in each column; it does not clear roofed spaces.
+
+## Wooden axe tree farmer checks
+
+The tree-farming GameTest covers assignment without tool wear, ordinary axes retaining clearing behavior, remembered planting species and sites across save/reload, repeated harvest/replant cycles, exact real-sapling consumption, no free saplings when supplies run out, full/missing storage pause and automatic resumption, original 2×2 dark oak footprints, waiting for a complete four-sapling batch, preserving an obstructed planting site, and cross-chunk birch replanting.
+
+For an in-game check, assign a wooden axe near a few trees and an open Copper Chest. Confirm wood and spare saplings accumulate, cleared tree bases receive matching saplings, and the worker harvests them again after normal growth. Use another axe to clear trees permanently.

@@ -1,21 +1,41 @@
-# Copper Golem Jobs — Fabric 26.3 — 0.2.3 test build
+# Copper Golem Jobs — Fabric 26.3 — 0.3.1 test build
 
 Give a vanilla Copper Golem a job by right-clicking it with a vanilla tool. No fuel, power source, hearts, upgrades, or tool durability costs.
 
+[Download the 0.3.1 test jar](dist/copper-golem-jobs-fabric-26.3-0.3.1.jar).
+
 ## Install
 
-Use Minecraft Java **26.3**, Fabric Loader **0.19.5 or newer**, and Fabric API **0.160.6+26.3**. Put `copper-golem-jobs-fabric-26.3-0.2.3.jar` into `mods` alongside Fabric API. Remove the earlier `copper-golems` test mod before installing this restart; the two mods deliberately cannot load together.
+Use Minecraft Java **26.3**, Fabric Loader **0.19.5 or newer**, and Fabric API **0.160.6+26.3**. Put `copper-golem-jobs-fabric-26.3-0.3.1.jar` into `mods` alongside Fabric API. Remove the earlier `copper-golems` test mod before installing this restart; the two mods deliberately cannot load together.
 
 The mod uses vanilla mobs, items, blocks, and visuals. The jar works in single-player and on a Fabric server. Begin in a separate Creative test world because several jobs excavate terrain automatically.
 
 ## Controls
 
 - Right-click a Copper Golem with a job item to assign it. Your item stays in your inventory. The item in the golem's hand is a display copy and does not drop as loot.
-- Right-click with an empty main hand to clear the job. The golem returns to its normal vanilla behavior.
+- Right-click with an empty main hand to clear the job. An unfinished drain project is paused and retained; reassign a Loyalty III trident to resume it. Other jobs cannot replace an unfinished drain project.
 - Sneak-right-click with an empty main hand to read its job and current waiting reason in chat.
 - Sneak-right-click with an axe for normal vanilla scraping. Honeycomb still waxes it normally. Vanilla oxidation remains active; wax workers you want to keep working indefinitely.
 - If an unassigned golem is already carrying a real item, retrieve that item with an empty hand before assigning a job.
 - Reassigning a job resets its work chunk and uses the golem's current facing for mining. Changing jobs does not create another physical tool.
+
+## Generator setup
+
+1. Assign a wooden pickaxe to a Copper Golem in the generator's chunk.
+2. Hold another wooden pickaxe and right-click the stone or cobblestone output block. The nearest generator worker in that assignment chunk, within 64 blocks of the block, receives that position.
+3. Provide Copper Chest storage. It mines the marked position and waits for stone/cobblestone to reappear. It never switches to neighboring blocks or replaces the generator's lava/water with glass.
+
+Re-marking changes the target. The marked position survives save/reload. Wooden pickaxes no longer start the full-chunk quarry; use another pickaxe for that job.
+
+## Monument drain setup
+
+Place the golem on a solid platform **at ocean water level, directly above a naturally generated Ocean Monument**, and assign a **Loyalty III trident**. Its feet should be one block above the top water block. Keep open Copper Chests within 64 blocks of its working positions; a chest near the center is preferable. Stay within simulation distance so the golem keeps ticking, keep the monument footprint loaded, and wax the golem for a long project.
+
+The worker surveys the monument's recorded structure bounds, leaves one column of clearance around its footprint, and builds its outer glass wall a further block out. It clears exterior kelp/seagrass, returns to its starting platform, fills the exterior columns with supplied sand, constructs and verifies the perimeter barrier, removes its temporary sand without drops, and returns home. Temporary glass footholds are cleaned up; permanent walls remain. Sand columns are assembled stably from the bottom while the golem works at the surface, avoiding large groups of falling-sand entities.
+
+**Exterior work only:** each surveyed column ends at its first existing solid block. Monument roofs, walls, rooms, and water beneath existing roofs remain untouched. Existing terrain and player blocks are preserved. Only kelp and seagrass are collected, using the same Copper Chest rule as other jobs. The sand/glass supply costs no resources in this test version.
+
+Progress, surveyed floors, temporary sand ownership, and scaffolds survive save/reload. Missing/full storage or unloaded work chunks pause the job. A changed or obstructed construction site may need you to clear access before it can continue. Construction is incremental and a full-sized monument is a long-running job. Sneak-right-click with an empty hand to inspect progress.
 
 ## Copper Chest rule
 
@@ -33,7 +53,9 @@ Block and harvest output is checked as a complete batch before anything is broke
 
 | Item | Test-build behavior |
 |---|---|
-| Pickaxe | Quarries the assigned 16×16 chunk one layer at a time, descending toward bedrock on a cobblestone staircase it builds automatically. Block drops use a Netherite pickaxe with Silk Touch. |
+| Wooden pickaxe | Generator worker: mark stone or cobblestone in its assignment chunk with another wooden pickaxe. Repeatedly mines only that exact position as it regenerates, with Silk Touch. Never seals the generator fluids. |
+| Loyalty III trident | Exterior Ocean Monument drain crew. Supplies temporary sand and permanent glass, collects kelp/seagrass, leaves monument blocks and interior rooms alone, then returns home. |
+| Other pickaxes | Quarries the assigned 16×16 chunk one layer at a time, descending toward bedrock on a cobblestone staircase it builds automatically. Block drops use a Netherite pickaxe with Silk Touch. |
 | Shovel | Removes reachable shovel-mineable blocks in the assignment chunk: dirt, sand, gravel, clay, snow, and similar blocks. Respects accessibility and retries as the terrain changes. |
 | Axe | Searches the assignment chunk and all eight neighboring chunks. It can cross chunk borders and follows connected tree logs up to 64 blocks from its assignment point. Deposits normal log and leaf drops. Log clusters without natural leaves are skipped. |
 | Fishing rod | Works at reachable source water in the assignment chunk. Uses vanilla fishing loot, including biome and open-water checks. Catches repeat after 10–30 seconds. A splash marks each catch; there is no persistent cast-line animation. |
@@ -60,9 +82,9 @@ The prebuilt jar is ready to test. To build from source, extract this source zip
 C:\Gradle\bin\gradle.bat build
 ```
 
-Use **JDK 25** and **Gradle 9.5.1 or newer compatible with Loom 1.18**. The project pins **Loom 1.18.2**, uses the unobfuscated Minecraft 26.3 names, and does not use Yarn mappings. Gradle downloads the dependencies on the first build.
+Use **JDK 25** and **Gradle 9.5.1 or newer compatible with Loom 1.17**. The project pins **Loom 1.17.20**, uses the unobfuscated Minecraft 26.3 names, and does not use Yarn mappings. Gradle downloads the dependencies on the first build.
 
-The installable output is `build/libs/copper-golem-jobs-fabric-26.3-0.2.3.jar`. The `-sources.jar` is source code for developers, not the mod to install.
+The installable output is `build/libs/copper-golem-jobs-fabric-26.3-0.3.1.jar`. The `-sources.jar` is source code for developers, not the mod to install.
 
 Optional headless game tests:
 
@@ -72,4 +94,4 @@ C:\Gradle\bin\gradle.bat -PgameTests=true runGameTest
 
 See `TESTING.md` for automated verification and the short in-game test checklist.
 
-API references: [Fabric 26.3 development notes](https://fabricmc.net/2026/06/15/262.html), [Loom](https://docs.fabricmc.net/develop/loom/), [Fabric game tests](https://docs.fabricmc.net/develop/automatic-testing), and the actual Mojang 26.3 server classes. Game and Fabric binaries are not included in this source archive.
+API references: [Loom](https://docs.fabricmc.net/develop/loom/), [Fabric game tests](https://docs.fabricmc.net/develop/automatic-testing), and the actual Mojang 26.3 server classes. Game and Fabric binaries are not included in this source archive.

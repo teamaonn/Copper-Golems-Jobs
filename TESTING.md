@@ -1,10 +1,10 @@
-# Testing this first build
+# Testing version 0.3.0
 
 ## Automated checks
 
 The Java sources were compiled against the actual Minecraft 26.2 server classes with JDK 25, Fabric Loader 0.19.5, and Fabric API 0.160.0+26.2. Runtime checks use Fabric's headless GameTest server, which applies the actual mod mixins and loads vanilla registries and loot tables.
 
-The integration test exercises:
+The regression suite exercises:
 
 - Right-click assignment, retaining the original tool and its durability, and empty-hand job clearing.
 - Missing Copper Chests, full storage, automatic resumption, and exact output amounts.
@@ -17,10 +17,16 @@ The integration test exercises:
 - Inventory overflow rejection and exact stack capacity.
 - Actual golem AI movement to a distant target followed by collection and storage.
 - More than 64 consecutive shovel drops and automatic recovery from a navigator that claims to be walking while making no progress.
+- Wooden-pickaxe assignment, block-click generator marking, repeated output, waiting for regeneration, preserving generator lava, storage pause/resume, and saved target positions.
+- Loyalty III assignment gating and discovering a registered monument's actual structure bounds beneath a water-level platform.
+- A miniature monument exterior with a sealed room: surveying, plant collection, sand fill, glass walls, barrier verification, sand removal, return home, and scaffold cleanup. A mid-fill save/reload preserves ownership; existing seabed sand, monument blocks, and room water remain untouched.
+- A separate full live miniature drain run with normal entity movement and fluid ticks. The test itself holds its surrounding chunks active to simulate a nearby player; the mod does not force-load chunks.
 
-`validation/gametest-results.xml` contains the final machine-generated report. The suite includes the custom integration test and Minecraft's built-in always-pass control. Individual assertions are listed in `validation/passed-checks.txt`.
+These are headless tests with constructed fixtures and registered structure metadata, not a completed playtest on a full naturally generated Ocean Monument. Full-size terrain, guardians, player structures, and long-running performance still need in-game testing.
 
-The compiled jar is produced directly from these checked Java classes and the mod resources. This environment's Loom startup hit a restricted Unix socket probe, so the Gradle lifecycle itself could not complete here. The supplied Gradle project uses the Fabric 26.2 setup and pinned Loom version; it is intended for your normal Windows build environment. No Minecraft or Fabric dependency binaries are bundled in the deliverables.
+`validation/gametest-results.xml` contains the final machine-generated report. The suite includes three custom tests and Minecraft's built-in always-pass control. Individual assertions are listed in `validation/passed-checks.txt`.
+
+The compiled jar is produced directly from these checked Java classes and the mod resources. The normal Gradle build could not resolve the Loom plugin through this environment's network proxy, so the Gradle lifecycle itself did not complete here. The supplied Gradle project uses the Fabric 26.2 setup and pinned Loom version; it is intended for your normal Windows build environment. No Minecraft or Fabric dependency binaries are bundled in the deliverables.
 
 ## Quick checks in Minecraft
 
@@ -32,3 +38,10 @@ The compiled jar is produced directly from these checked Java classes and the mo
 6. Empty-hand right-click to clear a job. Sneak-right-click with an empty hand to read the current status. Save and reload while a job is assigned and confirm it resumes.
 
 For a bug report, include the job item, chat status, whether the chest is reachable by the 64-block distance rule, the chest contents, and the relevant error from `logs/latest.log` if one appears. Client animations and natural-world pathfinding still need player testing; the automated scenarios use controlled terrain.
+
+## New job playtest
+
+- Give a golem a wooden pickaxe in a generator's chunk, then right-click that generator's stone/cobblestone output with another wooden pickaxe. Confirm only that position is mined, generation fluids remain intact, and full/missing Copper Chest storage pauses it.
+- For the drain crew, use a naturally generated monument. Put the golem on a solid block at the ocean surface directly above it, provide a Loyalty III trident and Copper Chests, and keep it within simulation distance. Confirm exterior vegetation is collected, sand surrounds/covers the exterior, glass walls stay, and temporary sand is removed with no drops.
+- Pause with an empty-hand click, save/reload, and give it a Loyalty III trident again to resume. Check progress with sneak + empty-hand right-click.
+- Confirm the monument and its interior rooms remain untouched. Work stops at the top existing solid in each column; it does not clear roofed spaces.

@@ -1,0 +1,66 @@
+assignment keeps the original tool and its durability
+empty hand clears job and display item
+missing Copper Chest stops work
+full chest stops shovel before breaking
+shovel resumes and deposits exact drop
+spear clears a 3x3 tunnel slice
+tunnel cell cleared
+tunnel cell cleared
+tunnel cell cleared
+tunnel cell cleared
+tunnel cell cleared
+tunnel cell cleared
+tunnel cell cleared
+tunnel cell cleared
+tunnel cell cleared
+3x3 tunnel builds a cobblestone path across a gap
+pickaxe clears the assigned chunk layer instead of one staircase block
+pickaxe uses Silk Touch
+quarry builds its own descending cobblestone staircase
+miner seals exposed water with glass
+quarry removes temporary water-sealing glass on its next pass
+miner seals exposed lava with glass
+quarry removes temporary lava-sealing glass on its next pass
+bedrock stops mining
+cocoa harvest replants and stores two beans
+hoe harvests and replants wheat
+hoe withdraws planting supplies from chest
+hoe tills dry tillable dirt even without nearby water
+axe crosses the assignment chunk boundary to clear a connected tree
+milking requires a chest bucket
+one milk consumes one bucket and starts 60-second cooldown
+sheep shearing stores wool
+vine shearing preserves upper vine
+sword kills hostile and captures guaranteed equipment drop
+fishing produces vanilla loot in Copper Chest
+mixin save/reload preserves assignment, direction, cooldown, structural blocks and overflow
+spear stops before unknown chunk without loading it
+chest exactly 64 blocks away is valid
+chest beyond 64 blocks is rejected
+overflow cannot partially mutate inventory
+exact stack fit commits
+digging continues beyond the first 64-item stack
+stale walking path is detected and abandoned automatically
+wooden pickaxe selects generator mode, not quarry
+wooden pickaxe right-click marks a generator position
+generator repeatedly mines regenerated blocks into Copper Chest
+generator leaves its lava supply untouched
+empty generator waits without losing its marked position
+full chest pauses generator before breaking
+generator resumes with Silk Touch stone after chest is emptied
+generator ignores replacement blocks other than stone or cobblestone
+generator assignment survives save and reload
+unenchanted trident cannot assign drain crew
+Loyalty III trident assigns drain crew
+no monument or ocean surface means no construction
+drain discovers monument metadata beneath its water-level platform and uses full structure bounds
+drain completes all exterior construction stages after a mid-fill reload
+only kelp and seagrass are deposited; temporary sand gives no drops
+monument blocks and interior water remain untouched
+drain returns home and cleans temporary footholds
+drain swimming control raises the golem through exterior water
+pausing drain movement restores gravity
+live AI builds across a gap, resumes digging, and deposits its drop
+live drain walks, swims, finishes and returns home without test teleports
+live drain keeps sealed interior water intact through fluid ticks
+live drain creates no sand payout

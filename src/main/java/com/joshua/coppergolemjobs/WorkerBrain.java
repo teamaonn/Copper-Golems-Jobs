@@ -22,6 +22,7 @@ import java.util.function.Predicate;
 
 public final class WorkerBrain {
     public static void tick(ServerLevel level, CopperGolem golem, WorkerState state) {
+        if (state.job == Job.DRAIN) DrainJobs.motion(level, golem, state);
         if (state.cooldown > 0) state.cooldown--;
         if (golem.tickCount % 10 != 0) return;
         ChestStorage storage = ChestStorage.nearby(level, golem);
@@ -34,6 +35,8 @@ public final class WorkerBrain {
         if (!storage.hasSpace()) { wait(golem, state, "Copper Chests full"); return; }
         if (state.cooldown > 0) return;
         switch (state.job) {
+            case GENERATOR -> GeneratorJob.work(level, golem, state, storage);
+            case DRAIN -> DrainJobs.work(level, golem, state, storage);
             case PICKAXE -> BlockJobs.quarry(level, golem, state, storage);
             case SPEAR -> BlockJobs.tunnel(level, golem, state, storage);
             case SHOVEL, AXE, HOE, STICK -> BlockJobs.work(level, golem, state, storage);
@@ -49,6 +52,7 @@ public final class WorkerBrain {
 
     public static void wait(CopperGolem golem, WorkerState state, String reason) {
         golem.getNavigation().stop();
+        if (state.job == Job.DRAIN) DrainJobs.stop(golem, state);
         state.status = reason;
     }
 

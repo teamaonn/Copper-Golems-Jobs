@@ -30,6 +30,8 @@ public final class WorkerState {
     public final List<ItemStack> pending = new ArrayList<>();
     public final Map<BlockPos, Long> skipped = new HashMap<>();
     public final Set<BlockPos> structuralBlocks = new HashSet<>();
+    public BlockPos generator;
+    public final DrainState drain = new DrainState();
 
     public boolean inWorkChunk(BlockPos pos) {
         return (pos.getX() >> 4) == (origin.getX() >> 4)
@@ -44,6 +46,8 @@ public final class WorkerState {
         cooldown = 0;
         skipped.clear();
         structuralBlocks.clear();
+        generator = null;
+        drain.reset();
         clearTarget();
         status = job == Job.IDLE ? "Idle" : "Looking for a Copper Chest";
     }
@@ -71,6 +75,8 @@ public final class WorkerState {
         out.putInt("CopperJobsCooldown", cooldown);
         out.store("CopperJobsPending", ItemStack.CODEC.listOf(), pending);
         out.store("CopperJobsStructuralBlocks", BlockPos.CODEC.listOf(), new ArrayList<>(structuralBlocks));
+        if (generator != null) out.putLong("CopperJobsGenerator", generator.asLong());
+        drain.save(out);
     }
 
     public void load(ValueInput in) {
@@ -85,6 +91,8 @@ public final class WorkerState {
         pending.addAll(in.read("CopperJobsPending", ItemStack.CODEC.listOf()).orElse(List.of()));
         structuralBlocks.clear();
         structuralBlocks.addAll(in.read("CopperJobsStructuralBlocks", BlockPos.CODEC.listOf()).orElse(List.of()));
+        generator = in.getLong("CopperJobsGenerator").map(BlockPos::of).orElse(null);
+        drain.load(in);
         status = job == Job.IDLE ? "Idle" : "Resuming " + job.label;
         clearTarget();
     }

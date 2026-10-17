@@ -180,4 +180,164 @@ public final class WorkerGameTests {
             g.discard();helper.succeed();
         });
     }
+    @GameTest(maxTicks = 400, skyAccess = true)
+    public void generatorAndDrain(GameTestHelper helper) {
+        ServerLevel level=helper.getLevel();
+        BlockPos base=helper.absolutePos(new BlockPos(384,4,384));
+        base=new BlockPos((base.getX()>>4)*16+7,base.getY(),(base.getZ()>>4)*16+7);
+        for(int x=-8;x<=8;x++)for(int z=-8;z<=8;z++)level.getChunk((base.getX()+x)>>4,(base.getZ()+z)>>4);
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-8,-6,-8),base.offset(8,5,8)))
+            level.setBlock(p,p.getY()<base.getY()-4?Blocks.STONE.defaultBlockState():Blocks.AIR.defaultBlockState(),2);
+        CopperGolem g=EntityTypes.COPPER_GOLEM.create(level,net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+        g.setPos(Vec3.atBottomCenterOf(base));g.setNoAi(true);level.addFreshEntity(g);
+        WorkerState s=((WorkerAccess)g).copperJobs$state();
+        BlockPos chestPos=base.offset(0,0,-5);
+        level.setBlock(chestPos,BuiltInRegistries.BLOCK.getValue(Identifier.withDefaultNamespace("copper_chest")).defaultBlockState(),3);
+        Container chest=(Container)level.getBlockEntity(chestPos);
+        var player=helper.makeMockPlayer(net.minecraft.world.level.GameType.SURVIVAL);
+        player.setPos(Vec3.atBottomCenterOf(base));
+        var hand=net.minecraft.world.InteractionHand.MAIN_HAND;
+        player.setItemInHand(hand,new ItemStack(Items.WOODEN_PICKAXE));
+        net.fabricmc.fabric.api.event.player.UseEntityCallback.EVENT.invoker().interact(player,level,hand,g,null);
+        check(s.job==Job.GENERATOR,"wooden pickaxe selects generator mode, not quarry");
+        BlockPos generator=base.east();
+        level.setBlock(base.below(),Blocks.STONE.defaultBlockState(),3);
+        level.setBlock(generator,Blocks.COBBLESTONE.defaultBlockState(),3);
+        level.setBlock(generator.east(),Blocks.LAVA.defaultBlockState(),2);
+        var hit=new net.minecraft.world.phys.BlockHitResult(Vec3.atCenterOf(generator),Direction.UP,generator,false);
+        net.fabricmc.fabric.api.event.player.UseBlockCallback.EVENT.invoker().interact(player,level,hand,hit);
+        check(generator.equals(s.generator),"wooden pickaxe right-click marks a generator position");
+        for(int cycle=0;cycle<3;cycle++) {
+            level.setBlock(generator,Blocks.COBBLESTONE.defaultBlockState(),3);step(level,g,s);
+        }
+        check(count(chest,Items.COBBLESTONE)==3,"generator repeatedly mines regenerated blocks into Copper Chest");
+        check(level.getBlockState(generator.east()).is(Blocks.LAVA),"generator leaves its lava supply untouched");
+        step(level,g,s);check(s.generator.equals(generator)&&s.status.contains("regenerate"),"empty generator waits without losing its marked position");
+        level.setBlock(generator,Blocks.STONE.defaultBlockState(),3);
+        for(int n=0;n<chest.getContainerSize();n++)chest.setItem(n,new ItemStack(Items.DIRT,64));
+        step(level,g,s);check(level.getBlockState(generator).is(Blocks.STONE),"full chest pauses generator before breaking");
+        chest.clearContent();step(level,g,s);check(count(chest,Items.STONE)==1,"generator resumes with Silk Touch stone after chest is emptied");
+        level.setBlock(generator,Blocks.DIAMOND_BLOCK.defaultBlockState(),3);step(level,g,s);
+        check(level.getBlockState(generator).is(Blocks.DIAMOND_BLOCK),"generator ignores replacement blocks other than stone or cobblestone");
+        var saved=TagValueOutput.createWithContext(ProblemReporter.DISCARDING,level.registryAccess());s.save(saved);
+        WorkerState restored=new WorkerState();restored.load(TagValueInput.create(ProblemReporter.DISCARDING,level.registryAccess(),saved.buildResult()));
+        check(generator.equals(restored.generator)&&restored.job==Job.GENERATOR,"generator assignment survives save and reload");
+        player.setItemInHand(hand,new ItemStack(Items.TRIDENT));
+        net.fabricmc.fabric.api.event.player.UseEntityCallback.EVENT.invoker().interact(player,level,hand,g,null);
+        check(s.job==Job.GENERATOR,"unenchanted trident cannot assign drain crew");
+        player.getItemInHand(hand).enchant(level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT)
+            .getOrThrow(net.minecraft.world.item.enchantment.Enchantments.LOYALTY),3);
+        net.fabricmc.fabric.api.event.player.UseEntityCallback.EVENT.invoker().interact(player,level,hand,g,null);
+        check(s.job==Job.DRAIN,"Loyalty III trident assigns drain crew");
+        step(level,g,s);check(s.drain.stage==DrainState.Stage.NEW,"no monument or ocean surface means no construction");
+        // Small monument-shaped exterior fixture: a sealed water-filled room under a prismarine roof.
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-4,-4,-4),base.offset(4,1,4)))
+            level.setBlock(p,p.getY()==base.getY()-4?Blocks.SAND.defaultBlockState():
+                p.getY()<=base.getY()?Blocks.WATER.defaultBlockState():Blocks.AIR.defaultBlockState(),2);
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-1,-3,-1),base.offset(1,-2,1)))
+            if(p.getY()==base.getY()-2 || p.getX()!=base.getX() || p.getZ()!=base.getZ())level.setBlock(p,Blocks.PRISMARINE.defaultBlockState(),2);
+        BlockPos room=base.below(3);
+        BlockPos roof=base.below(2);
+        BlockPos kelp=base.offset(2,-3,0),grass=base.offset(-2,-3,0);
+        level.setBlock(kelp,Blocks.KELP.defaultBlockState(),2);level.setBlock(grass,Blocks.SEAGRASS.defaultBlockState(),2);
+        BlockPos home=base.above();level.setBlock(base,Blocks.COBBLESTONE.defaultBlockState(),2);
+        s.assign(Job.DRAIN,home,Direction.NORTH);g.setPos(Vec3.atBottomCenterOf(home));chest.clearContent();
+        var monument=level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.STRUCTURE)
+            .getOrThrow(net.minecraft.world.level.levelgen.structure.BuiltinStructures.OCEAN_MONUMENT).value();
+        var piece=new net.minecraft.world.level.levelgen.structure.structures.OceanMonumentPieces.MonumentBuilding(
+            net.minecraft.util.RandomSource.create(1),base.getX()-29,base.getZ()-29,Direction.NORTH);
+        var pb=piece.getBoundingBox();
+        piece.move(base.getX()-pb.getCenter().getX(),base.getY()-1-pb.maxY(),base.getZ()-pb.getCenter().getZ());
+        var chunk=new net.minecraft.world.level.ChunkPos(base.getX()>>4,base.getZ()>>4);
+        var start=new net.minecraft.world.level.levelgen.structure.StructureStart(monument,chunk,0,
+            new net.minecraft.world.level.levelgen.structure.pieces.PiecesContainer(List.of(piece)));
+        var originChunk=level.getChunk(chunk.x(),chunk.z());
+        originChunk.setStartForStructure(monument,start);
+        originChunk.addReferenceForStructure(monument,chunk.pack());
+        DrainJobs.work(level,g,s,ChestStorage.nearby(level,g));
+        check(s.drain.stage==DrainState.Stage.SURVEY&&s.drain.minX==piece.getBoundingBox().minX()-2,
+            "drain discovers monument metadata beneath its water-level platform and uses full structure bounds");
+        originChunk.setStartForStructure(monument,net.minecraft.world.level.levelgen.structure.StructureStart.INVALID_START);
+        s.assign(Job.DRAIN,home,Direction.NORTH);
+        s.drain.begin(new net.minecraft.world.level.levelgen.structure.BoundingBox(base.getX()-1,base.getY()-4,base.getZ()-1,
+            base.getX()+1,base.getY()-2,base.getZ()+1),base.getY());
+        boolean reloaded=false,sawWalls=false;
+        for(int n=0;n<10000 && s.drain.stage!=DrainState.Stage.DONE;n++) {
+            if(s.drain.travel!=null)g.setPos(Vec3.atBottomCenterOf(s.drain.travel));
+            if(s.drain.stage==DrainState.Stage.FILL && !reloaded && java.util.Arrays.stream(s.drain.sandTops).anyMatch(v->v!=Integer.MIN_VALUE)) {
+                var output=TagValueOutput.createWithContext(ProblemReporter.DISCARDING,level.registryAccess());s.save(output);
+                s.load(TagValueInput.create(ProblemReporter.DISCARDING,level.registryAccess(),output.buildResult()));reloaded=true;
+            }
+            if(s.drain.stage==DrainState.Stage.WALLS)sawWalls=true;
+            DrainJobs.work(level,g,s,ChestStorage.nearby(level,g));
+            checkQuiet(level.getBlockState(roof).is(Blocks.PRISMARINE),"drain must never mine monument roof");
+            checkQuiet(level.getBlockState(room).is(Blocks.WATER),"drain must never edit room water");
+            if(n==9999)throw new IllegalStateException("Drain failed to finish: "+s.drain.stage+" "+s.status+" index="+s.drain.index+" y="+s.drain.y);
+        }
+        check(reloaded&&sawWalls&&s.drain.stage==DrainState.Stage.DONE,"drain completes all exterior construction stages after a mid-fill reload");
+        check(count(chest,Items.KELP)==1&&count(chest,Items.SEAGRASS)==1&&count(chest,Items.SAND)==0,"only kelp and seagrass are deposited; temporary sand gives no drops");
+        check(level.getBlockState(room).is(Blocks.WATER)&&level.getBlockState(roof).is(Blocks.PRISMARINE),"monument blocks and interior water remain untouched");
+        for(int c=0;c<s.drain.columns();c++) {
+            BlockPos p=s.drain.column(c,base.getY());
+            if(s.drain.wall(p))checkQuiet(level.getBlockState(p).is(Blocks.GLASS),"outside glass wall remains");
+            else if(s.drain.floors[c]<base.getY())for(int y=s.drain.floors[c]+1;y<=base.getY();y++)
+                checkQuiet(level.getBlockState(s.drain.column(c,y)).isAir(),"exterior column must be drained and cleared of temporary sand");
+            checkQuiet(level.getBlockState(s.drain.column(c,base.getY()-4)).is(Blocks.SAND),"pre-existing seabed sand must remain");
+        }
+        check(s.drain.scaffolds.isEmpty()&&g.position().distanceToSqr(Vec3.atBottomCenterOf(home))<.16,"drain returns home and cleans temporary footholds");
+        // Collision-aware swimming is exercised without teleporting the worker.
+        s.assign(Job.DRAIN,home,Direction.NORTH);
+        s.drain.begin(new net.minecraft.world.level.levelgen.structure.BoundingBox(base.getX()-1,base.getY()-4,base.getZ()-1,base.getX()+1,base.getY()-2,base.getZ()+1),base.getY());
+        g.setPos(Vec3.atBottomCenterOf(base.offset(4,-3,0)));s.drain.travel=base.offset(4,1,0);s.drain.routePhase=2;
+        double before=g.getY();for(int n=0;n<12;n++)DrainJobs.motion(level,g,s);
+        check(g.getY()>before+1,"drain swimming control raises the golem through exterior water");
+        DrainJobs.stop(g,s);check(!g.isNoGravity()&&s.drain.travel==null,"pausing drain movement restores gravity");
+        g.discard();helper.succeed();
+    }
+    @GameTest(maxTicks = 12000, skyAccess = true, padding = 32)
+    public void liveDrain(GameTestHelper helper) {
+        ServerLevel level=helper.getLevel();
+        BlockPos base=helper.absolutePos(new BlockPos(4,5,4));
+        // The worker leaves the 8x8 template. Keep the surrounding fixture entity-ticking,
+        // as a nearby player would, rather than depending on the random test chunk alignment.
+        java.util.List<net.minecraft.world.level.ChunkPos> forced=new java.util.ArrayList<>();
+        for(int dx=-1;dx<=1;dx++)for(int dz=-1;dz<=1;dz++) {
+            var c=new net.minecraft.world.level.ChunkPos((base.getX()>>4)+dx,(base.getZ()>>4)+dz);
+            if(level.getChunkSource().updateChunkForced(c,true))forced.add(c);
+            level.getChunk(c.x(),c.z());
+        }
+        helper.runBeforeTestEnd(()->forced.forEach(c->level.getChunkSource().updateChunkForced(c,false)));
+
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-5,-4,-5),base.offset(5,3,5)))
+            level.setBlock(p,p.getY()==base.getY()-4?Blocks.STONE.defaultBlockState():
+                p.getY()<=base.getY()?Blocks.WATER.defaultBlockState():Blocks.AIR.defaultBlockState(),2);
+        // Contain the artificial ocean so its flowing water cannot spill into adjacent tests.
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-5,-4,-5),base.offset(5,0,5)))
+            if(Math.abs(p.getX()-base.getX())==5||Math.abs(p.getZ()-base.getZ())==5)
+                level.setBlock(p,Blocks.GLASS.defaultBlockState(),2);
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-1,-3,-1),base.offset(1,-2,1)))
+            if(p.getY()==base.getY()-2 || p.getX()!=base.getX() || p.getZ()!=base.getZ())level.setBlock(p,Blocks.PRISMARINE.defaultBlockState(),2);
+        level.setBlock(base.offset(2,-3,0),Blocks.KELP.defaultBlockState(),2);
+        level.setBlock(base.offset(-2,-3,0),Blocks.SEAGRASS.defaultBlockState(),2);
+        level.setBlock(base,Blocks.COBBLESTONE.defaultBlockState(),3);
+        BlockPos chestPos=base.offset(0,1,-4);level.setBlock(chestPos.below(),Blocks.STONE.defaultBlockState(),3);
+        level.setBlock(chestPos,BuiltInRegistries.BLOCK.getValue(Identifier.withDefaultNamespace("copper_chest")).defaultBlockState(),3);
+        CopperGolem g=EntityTypes.COPPER_GOLEM.create(level,net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+        g.setPos(Vec3.atBottomCenterOf(base.above()));level.addFreshEntity(g);
+        WorkerState s=((WorkerAccess)g).copperJobs$state();s.assign(Job.DRAIN,base.above(),Direction.NORTH);
+        s.drain.begin(new net.minecraft.world.level.levelgen.structure.BoundingBox(base.getX()-1,base.getY()-4,base.getZ()-1,
+            base.getX()+1,base.getY()-2,base.getZ()+1),base.getY());
+        helper.onEachTick(()->{
+            if(helper.getTick()%1000==0)System.out.println("LIVE DRAIN "+helper.getTick()+" "+s.drain.stage+" "+s.drain.index+" "+s.drain.y+" "+s.status+" "+g.position()+" target="+s.drain.travel+" phase="+s.drain.routePhase+" route="+s.drain.route+" lid="+(s.drain.travel==null?"none":level.getBlockState(new BlockPos(s.drain.travel.getX(),s.drain.surfaceY,s.drain.travel.getZ()))) );
+            checkQuiet(level.getBlockState(base.below(2)).is(Blocks.PRISMARINE),"live drain must preserve roof");
+            if(s.drain.stage==DrainState.Stage.DONE) {
+                check(g.position().distanceToSqr(Vec3.atBottomCenterOf(base.above()))<.5,"live drain walks, swims, finishes and returns home without test teleports");
+                check(level.getBlockState(base.below(3)).is(Blocks.WATER),"live drain keeps sealed interior water intact through fluid ticks");
+                check(count((Container)level.getBlockEntity(chestPos),Items.SAND)==0,"live drain creates no sand payout");
+                g.discard();helper.succeed();
+            }
+        });
+    }
+    private static void checkQuiet(boolean pass,String description) { if(!pass)throw new IllegalStateException(description); }
+
 }

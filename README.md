@@ -1,12 +1,12 @@
-# Copper Golem Jobs — Fabric 26.3 — 0.3.3 test build
+# Copper Golem Jobs — Fabric 26.3 — 0.3.4 test build
 
 Give a vanilla Copper Golem a job by right-clicking it with a vanilla tool. No fuel, power source, hearts, upgrades, or tool durability costs.
 
-[Download the 0.3.3 test jar](dist/copper-golem-jobs-fabric-26.3-0.3.3.jar).
+[Download the 0.3.4 test jar](dist/copper-golem-jobs-fabric-26.3-0.3.4.jar).
 
 ## Install
 
-Use Minecraft Java **26.3**, Fabric Loader **0.19.5 or newer**, and Fabric API **0.160.6+26.3**. Put `copper-golem-jobs-fabric-26.3-0.3.3.jar` into `mods` alongside Fabric API. Remove the earlier `copper-golems` test mod before installing this restart; the two mods deliberately cannot load together.
+Use Minecraft Java **26.3**, Fabric Loader **0.19.5 or newer**, and Fabric API **0.160.6+26.3**. Put `copper-golem-jobs-fabric-26.3-0.3.4.jar` into `mods` alongside Fabric API. Remove the earlier `copper-golems` test mod before installing this restart; the two mods deliberately cannot load together.
 
 The mod uses vanilla mobs, items, blocks, and visuals. The jar works in single-player and on a Fabric server. Begin in a separate Creative test world because several jobs excavate terrain automatically.
 
@@ -39,7 +39,7 @@ Dark oak and pale oak use four saplings in a 2×2 planting site. Existing giant 
 
 ## Netherite axe and protected logs
 
-Give a golem a **netherite axe** to fell connected trees without the ordinary 256-log or 64-block tree-size limits. It first reaches a trunk in the normal tree search area, surveys connected logs and nearby leaves, then harvests in small batches. Progress survives save/reload, and full or missing Copper Chests pause work. Keep the tree chunks loaded; the worker does not force-load them. This role clears trees without replanting.
+Give a golem a **netherite axe** to fell connected trees without the ordinary 256-log or 64-block tree-size limits. It first reaches a trunk in the normal tree search area, surveys connected logs and leaves within ten blocks of each log, then harvests in small batches. Progress survives save/reload, and full or missing Copper Chests pause work. Keep the tree chunks loaded; the worker does not force-load them. This role clears trees without replanting.
 
 Modded mega trees are supported when their blocks use Minecraft's standard `logs` and `leaves` tags. The survey accepts persistent leaves as well. Compatibility with a particular tree mod still needs an in-game check.
 
@@ -92,7 +92,7 @@ Mining and digging seal exposed water and lava with glass automatically. Tempora
 
 Worker navigation has a movement watchdog. If Minecraft reports an active path but the golem makes no progress for three seconds, the route is recalculated. After three failed routes, that blocked target is temporarily skipped so the golem can continue with other work without being reassigned.
 
-Tree detection uses connected unstripped logs plus leaves; unstripped structures touching tree foliage can still be treated as trees. Ordinary axes and wooden-axe farmers process at most 256 connected logs within 64 blocks of the assignment point; netherite axes remove those tree-size limits. Leaves within three blocks of surveyed logs are collected. Farm support in this build is limited to the four crops listed above. Sword material does not change damage.
+Tree detection uses connected unstripped logs plus leaves; unstripped structures touching tree foliage can still be treated as trees. Ordinary axes and wooden-axe farmers process at most 256 connected logs within 64 blocks of the assignment point; netherite axes remove those tree-size limits. The netherite large-tree worker collects leaves up to ten blocks from surveyed logs in every direction; ordinary axes and wooden-axe farmers keep the three-block leaf range. Farm support in this build is limited to the four crops listed above. Sword material does not change damage.
 
 ## Build on your PC
 
@@ -104,7 +104,7 @@ C:\Gradle\bin\gradle.bat build
 
 Use **JDK 25** and **Gradle 9.5.1 or newer compatible with Loom 1.17**. The project pins **Loom 1.17.20**, uses the unobfuscated Minecraft 26.3 names, and does not use Yarn mappings. Gradle downloads the dependencies on the first build.
 
-The installable output is `build/libs/copper-golem-jobs-fabric-26.3-0.3.3.jar`. The `-sources.jar` is source code for developers, not the mod to install.
+The installable output is `build/libs/copper-golem-jobs-fabric-26.3-0.3.4.jar`. The `-sources.jar` is source code for developers, not the mod to install.
 
 Optional headless game tests:
 

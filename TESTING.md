@@ -1,4 +1,4 @@
-# Testing version 0.3.3
+# Testing version 0.3.4
 
 ## Automated checks
 
@@ -59,3 +59,7 @@ Additional checks cover a fresh coarse-dirt platform with no trees or saved site
 ## Netherite mega-tree and stripped-log regression
 
 A constructed 320-log, 80-block-tall tree exercises discovery beyond the ordinary count and distance limits, persistent leaf recognition, saved survey and harvest progress, full-storage pause/resume, exact drops, and the 16-block harvest budget. Adjacent stripped logs and stripped wood remain intact for netherite, ordinary axes, and wooden-axe farmers. A log stripped after surveying also remains intact. This uses vanilla tagged blocks to model a mega tree; individual third-party tree mods have not been playtested. For an in-game check, use a netherite axe beside a modded mega tree, keep its chunks loaded, and check stripped structural blocks alongside it.
+
+## Ten-block giant-tree canopy regression (0.3.4)
+
+The netherite large-tree fixture now includes persistent leaves ten blocks from surveyed logs along horizontal, vertical, and diagonal directions, plus an eleven-block control. The ten-block leaves are collected and the control remains. Ordinary axe and wooden-axe jobs retain their original leaf range. Tests also resume a saved extended-canopy cursor and migrate an old three-block saved harvest back into canopy surveying. Canopy work limits new block reads to 4,096 and duplicate-position visits to 65,536 per work tick; overlapping scan cubes share a visited-position cache.

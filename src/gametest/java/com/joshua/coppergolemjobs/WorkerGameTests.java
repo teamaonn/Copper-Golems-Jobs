@@ -485,6 +485,8 @@ public final class WorkerGameTests {
         check(Job.of(new ItemStack(Items.NETHERITE_AXE))==Job.MEGA_AXE,"netherite axe selects the unlimited-size tree cutter");
         for(int x=0;x<2;x++)for(int z=0;z<2;z++)for(int y=0;y<80;y++)level.setBlock(root.offset(x,y,z),Blocks.OAK_LOG.defaultBlockState(),2);
         level.setBlock(root.above(80),Blocks.OAK_LEAVES.defaultBlockState().setValue(BlockStateProperties.PERSISTENT,true),2);
+        BlockPos outer=root.above(78).north(10),corner=root.offset(-10,78,-10),top=root.above(89),outside=root.above(78).north(11);
+        for(BlockPos p:List.of(outer,corner,top,outside))level.setBlock(p,Blocks.OAK_LEAVES.defaultBlockState().setValue(BlockStateProperties.PERSISTENT,true),2);
         BlockPos stripped=root.north(),wood=root.east(2);
         level.setBlock(stripped,Blocks.STRIPPED_OAK_LOG.defaultBlockState(),2);level.setBlock(wood,Blocks.STRIPPED_OAK_WOOD.defaultBlockState(),2);
         s.assign(Job.MEGA_AXE,base,Direction.EAST);step(level,g,s);
@@ -494,6 +496,17 @@ public final class WorkerGameTests {
         check(s.megaTree.phase==MegaTreeJob.Phase.LOGS&&s.megaTree.logs.size()==discovered&&!s.megaTree.frontier.isEmpty(),"large-tree frontier and progress survive save/reload");
         for(int n=0;n<100&&s.megaTree.phase!=MegaTreeJob.Phase.HARVEST;n++)step(level,g,s);
         check(s.megaTree.phase==MegaTreeJob.Phase.HARVEST&&s.megaTree.logs.size()==320,"large-tree survey follows all 320 logs including those above the old 64-block range");
+        check(s.megaTree.leaves.contains(outer)&&s.megaTree.leaves.contains(corner)&&s.megaTree.leaves.contains(top)&&!s.megaTree.leaves.contains(outside),"mega-tree canopy includes leaves ten blocks out horizontally, vertically and diagonally, but stops at eleven");
+        out=TagValueOutput.createWithContext(ProblemReporter.DISCARDING,level.registryAccess());s.save(out);
+        var legacy=out.buildResult();legacy.remove("MegaTreeLeafRadius");
+        s.load(TagValueInput.create(ProblemReporter.DISCARDING,level.registryAccess(),legacy));
+        check(s.megaTree.phase==MegaTreeJob.Phase.LEAVES&&s.megaTree.index==0,"saved jobs from the old three-block canopy resurvey before resuming harvest");
+        step(level,g,s);
+        int scanIndex=s.megaTree.index,scanOffset=s.megaTree.offset;
+        out=TagValueOutput.createWithContext(ProblemReporter.DISCARDING,level.registryAccess());s.save(out);
+        s.load(TagValueInput.create(ProblemReporter.DISCARDING,level.registryAccess(),out.buildResult()));
+        check(s.megaTree.index==scanIndex&&s.megaTree.offset==scanOffset,"ten-block canopy scan cursor survives save/reload");
+        for(int n=0;n<100&&s.megaTree.phase!=MegaTreeJob.Phase.HARVEST;n++)step(level,g,s);
         // Protect a previously surveyed log by stripping it before the cutter reaches it.
         BlockPos changed=root.above(79);level.setBlock(changed,Blocks.STRIPPED_OAK_LOG.defaultBlockState(),2);
         for(int n=0;n<chest.getContainerSize();n++)chest.setItem(n,new ItemStack(Items.DIRT,64));
@@ -505,9 +518,12 @@ public final class WorkerGameTests {
         for(int n=0;n<40&&s.megaTree.phase!=MegaTreeJob.Phase.IDLE;n++)step(level,g,s);
         check(s.megaTree.phase==MegaTreeJob.Phase.IDLE&&count(chest,Items.OAK_LOG)==319&&level.getBlockState(root.offset(1,79,1)).isAir(),"mega cutter finishes beyond 256 logs with exact drops after harvest save/reload");
         check(level.getBlockState(stripped).is(Blocks.STRIPPED_OAK_LOG)&&level.getBlockState(wood).is(Blocks.STRIPPED_OAK_WOOD)&&level.getBlockState(changed).is(Blocks.STRIPPED_OAK_LOG),"netherite cutter preserves stripped logs, stripped wood and logs stripped mid-job");
+        check(level.getBlockState(outer).isAir()&&level.getBlockState(corner).isAir()&&level.getBlockState(top).isAir()&&level.getBlockState(outside).is(Blocks.OAK_LEAVES),"mega worker harvests the extended canopy while preserving leaves beyond the ten-block boundary");
         for(Job job:List.of(Job.AXE,Job.TREE_FARM)) {
+            BlockPos normalOuter=root.east(8);level.setBlock(normalOuter,Blocks.OAK_LEAVES.defaultBlockState().setValue(BlockStateProperties.PERSISTENT,true),2);
             s.assign(job,base,Direction.EAST);testTree(level,root,Blocks.OAK_LOG,Blocks.OAK_LEAVES,1);step(level,g,s);
             check(level.getBlockState(root).isAir()&&level.getBlockState(stripped).is(Blocks.STRIPPED_OAK_LOG)&&level.getBlockState(wood).is(Blocks.STRIPPED_OAK_WOOD),job+" skips stripped structure blocks while harvesting adjacent trees");
+            check(level.getBlockState(normalOuter).is(Blocks.OAK_LEAVES),job+" retains the ordinary three-block canopy range");
         }
         g.discard();helper.succeed();
     }

@@ -19,6 +19,10 @@ import java.util.Set;
 
 /** No fixed tree-size limit. Discovery, canopy inspection and harvesting have per-tick budgets. */
 public final class MegaTreeJob {
+    private static final int LEAF_RADIUS = 10;
+    private static final int LEAF_WIDTH = LEAF_RADIUS * 2 + 1;
+    private static final int LEAF_PLANE = LEAF_WIDTH * LEAF_WIDTH;
+    private static final int LEAF_VOLUME = LEAF_PLANE * LEAF_WIDTH;
     public enum Phase { IDLE, LOGS, LEAVES, HARVEST }
     public static final class State {
         public Phase phase = Phase.IDLE;
@@ -40,6 +44,7 @@ public final class MegaTreeJob {
             out.store("MegaTreeFrontier",BlockPos.CODEC.listOf(),new ArrayList<>(frontier));
             out.store("MegaTreeLeaves",BlockPos.CODEC.listOf(),new ArrayList<>(leaves));
             out.putInt("MegaTreeIndex",index);out.putInt("MegaTreeOffset",offset);
+            out.putInt("MegaTreeLeafRadius",LEAF_RADIUS);
         }
         public void load(ValueInput in) {
             reset();
@@ -49,7 +54,11 @@ public final class MegaTreeJob {
             frontier.addAll(in.read("MegaTreeFrontier",BlockPos.CODEC.listOf()).orElse(List.of()));queued.addAll(frontier);
             leaves.addAll(in.read("MegaTreeLeaves",BlockPos.CODEC.listOf()).orElse(List.of()));
             index=Math.max(0,Math.min(logs.size(),in.getIntOr("MegaTreeIndex",0)));
-            offset=Math.max(0,Math.min(342,in.getIntOr("MegaTreeOffset",0)));
+            offset=Math.max(0,Math.min(LEAF_VOLUME-1,in.getIntOr("MegaTreeOffset",0)));
+            // Older jobs used a smaller canopy cube; resurvey saved logs before continuing.
+            if(in.getIntOr("MegaTreeLeafRadius",3)!=LEAF_RADIUS&&(phase==Phase.LEAVES||phase==Phase.HARVEST)) {
+                phase=Phase.LEAVES;index=0;offset=0;
+            }
         }
     }
 
@@ -90,16 +99,20 @@ public final class MegaTreeJob {
     }
 
     private static void canopy(ServerLevel level,CopperGolem g,WorkerState w,State s) {
-        for(int budget=0;budget<4096&&s.index<s.logs.size();budget++) {
+        int reads=0;
+        // Overlapping cubes share most positions. Bound actual reads and duplicate visits separately.
+        for(int visits=0;visits<65536&&reads<4096&&s.index<s.logs.size();visits++) {
             BlockPos log=s.logs.get(s.index);
-            BlockPos p=log.offset(s.offset/49-3,(s.offset/7)%7-3,s.offset%7-3);
+            BlockPos p=log.offset(s.offset/LEAF_PLANE-LEAF_RADIUS,
+                (s.offset/LEAF_WIDTH)%LEAF_WIDTH-LEAF_RADIUS,s.offset%LEAF_WIDTH-LEAF_RADIUS);
             if(validPosition(level,p)&&!s.seen.contains(p)&&!s.checkedLeaves.contains(p)) {
                 if(!WorkerBrain.loaded(level,p)){WorkerBrain.wait(g,w,"Large tree: waiting for canopy chunks to load");return;}
                 s.checkedLeaves.add(p);
+                reads++;
                 // Mod-generated mega trees may use persistent leaves. Stripped logs still remain protected.
                 if(level.getBlockState(p).is(BlockTags.LEAVES))s.leaves.add(p);
             }
-            if(++s.offset==343){s.offset=0;s.index++;}
+            if(++s.offset==LEAF_VOLUME){s.offset=0;s.index++;}
         }
         w.status="Inspecting large-tree canopy: "+s.index+"/"+s.logs.size();
         if(s.index==s.logs.size()) {

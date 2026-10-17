@@ -86,12 +86,18 @@ netherite axe selects the unlimited-size tree cutter
 mega-tree discovery is budgeted and does not break the entire tree in one tick
 large-tree frontier and progress survive save/reload
 large-tree survey follows all 320 logs including those above the old 64-block range
+mega-tree canopy includes leaves ten blocks out horizontally, vertically and diagonally, but stops at eleven
+saved jobs from the old three-block canopy resurvey before resuming harvest
+ten-block canopy scan cursor survives save/reload
 full storage pauses a surveyed mega tree before harvesting
 mega-tree harvesting respects the 16-block per-work-tick budget
 mega cutter finishes beyond 256 logs with exact drops after harvest save/reload
 netherite cutter preserves stripped logs, stripped wood and logs stripped mid-job
+mega worker harvests the extended canopy while preserving leaves beyond the ten-block boundary
 AXE skips stripped structure blocks while harvesting adjacent trees
+AXE retains the ordinary three-block canopy range
 TREE_FARM skips stripped structure blocks while harvesting adjacent trees
+TREE_FARM retains the ordinary three-block canopy range
 live tree farmer approaches and harvests under a low canopy without a player breaking leaves
 live AI builds across a gap, resumes digging, and deposits its drop
 live drain walks, swims, finishes and returns home without test teleports

@@ -529,4 +529,95 @@ public final class WorkerGameTests {
     }
     private static void checkQuiet(boolean pass,String description) { if(!pass)throw new IllegalStateException(description); }
 
+    private static ItemStack enchanted(ServerLevel level,Item item,net.minecraft.resources.ResourceKey<net.minecraft.world.item.enchantment.Enchantment> key,int amount) {
+        ItemStack stack=new ItemStack(item);
+        stack.enchant(level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT).getOrThrow(key),amount);
+        return stack;
+    }
+
+    private static net.minecraft.world.entity.monster.zombie.Zombie combatTarget(ServerLevel level,BlockPos pos) {
+        var zombie=EntityTypes.ZOMBIE.create(level,net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+        zombie.setPos(Vec3.atBottomCenterOf(pos));zombie.setNoAi(true);
+        zombie.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.ARMOR).setBaseValue(0);
+        level.addFreshEntity(zombie);return zombie;
+    }
+
+    @GameTest(maxTicks = 100, skyAccess = true)
+    public void enchantedCombatAndFishing(GameTestHelper helper) {
+        ServerLevel level=helper.getLevel();BlockPos base=helper.absolutePos(new BlockPos(1500,5,1500));
+        for(int dx=-1;dx<=1;dx++)for(int dz=-1;dz<=1;dz++)level.getChunk((base.getX()>>4)+dx,(base.getZ()>>4)+dz);
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-5,-3,-5),base.offset(12,5,8)))
+            level.setBlock(p,p.getY()<base.getY()?Blocks.STONE.defaultBlockState():Blocks.AIR.defaultBlockState(),2);
+        CopperGolem g=EntityTypes.COPPER_GOLEM.create(level,net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+        g.setPos(Vec3.atBottomCenterOf(base));g.setNoAi(true);level.addFreshEntity(g);
+        WorkerState s=((WorkerAccess)g).copperJobs$state();
+        BlockPos chestPos=base.offset(-2,0,-2);level.setBlock(chestPos,BuiltInRegistries.BLOCK.getValue(Identifier.withDefaultNamespace("copper_chest")).defaultBlockState(),3);
+        Container chest=(Container)level.getBlockEntity(chestPos);
+        var player=helper.makeMockPlayer(net.minecraft.world.level.GameType.SURVIVAL);
+        ItemStack sword=enchanted(level,Items.DIAMOND_SWORD,net.minecraft.world.item.enchantment.Enchantments.SHARPNESS,5);sword.setDamageValue(7);
+        player.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND,sword);
+        net.fabricmc.fabric.api.event.player.UseEntityCallback.EVENT.invoker().interact(player,level,net.minecraft.world.InteractionHand.MAIN_HAND,g,null);
+        check(s.job==Job.SWORD&&g.getMainHandItem().isEnchanted()&&sword.getCount()==1&&sword.getDamageValue()==7,"combat assignment copies the actual enchanted sword without consuming or wearing the player's item");
+        var target=combatTarget(level,base.east());float health=target.getHealth();step(level,g,s);float sharpDamage=health-target.getHealth();target.discard();
+        g.setItemSlot(EquipmentSlot.MAINHAND,new ItemStack(Items.DIAMOND_SWORD));target=combatTarget(level,base.east());health=target.getHealth();step(level,g,s);float plainDamage=health-target.getHealth();target.discard();
+        check(Math.abs(plainDamage-6)<.01&&Math.abs(sharpDamage-9)<.01,"Sharpness V adds vanilla bonus damage to the worker's six-damage base hit");
+        g.setItemSlot(EquipmentSlot.MAINHAND,enchanted(level,Items.DIAMOND_SWORD,net.minecraft.world.item.enchantment.Enchantments.SMITE,5));
+        target=combatTarget(level,base.east());health=target.getHealth();step(level,g,s);
+        check(Math.abs(health-target.getHealth()-18.5)<.01,"Smite V applies its undead-specific damage bonus");target.discard();
+        ItemStack effects=enchanted(level,Items.DIAMOND_SWORD,net.minecraft.world.item.enchantment.Enchantments.FIRE_ASPECT,2);
+        effects.enchant(level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT).getOrThrow(net.minecraft.world.item.enchantment.Enchantments.KNOCKBACK),2);
+        g.setItemSlot(EquipmentSlot.MAINHAND,effects);target=combatTarget(level,base.east());step(level,g,s);
+        check(target.isOnFire(),"Fire Aspect II ignites the attacked mob through vanilla post-attack effects");
+        check(target.getDeltaMovement().horizontalDistanceSqr()>0.05,"Knockback II pushes the attacked mob");target.discard();
+        for(int looting:List.of(0,3)) {
+            chest.clearContent();g.setItemSlot(EquipmentSlot.MAINHAND,looting==0?new ItemStack(Items.DIAMOND_SWORD):enchanted(level,Items.DIAMOND_SWORD,net.minecraft.world.item.enchantment.Enchantments.LOOTING,looting));
+            target=combatTarget(level,base.east());var out=TagValueOutput.createWithContext(ProblemReporter.DISCARDING,level.registryAccess());target.saveWithoutId(out);
+            var tag=out.buildResult();tag.putString("DeathLootTable","coppergolemjobs-test:looting_probe");target.load(TagValueInput.create(ProblemReporter.DISCARDING,level.registryAccess(),tag));target.setHealth(1);step(level,g,s);
+            check(!target.isAlive()&&count(chest,Items.DIAMOND)==1+looting,"Looting "+looting+" reaches the real entity death loot table and stores the exact bonus drops");target.discard();
+        }
+        ItemStack rod=enchanted(level,Items.FISHING_ROD,net.minecraft.world.item.enchantment.Enchantments.LURE,3);
+        rod.enchant(level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT).getOrThrow(net.minecraft.world.item.enchantment.Enchantments.LUCK_OF_THE_SEA),3);rod.setDamageValue(9);
+        player.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND,rod);
+        net.fabricmc.fabric.api.event.player.UseEntityCallback.EVENT.invoker().interact(player,level,net.minecraft.world.InteractionHand.MAIN_HAND,g,null);
+        var saved=TagValueOutput.createWithContext(ProblemReporter.DISCARDING,level.registryAccess());g.saveWithoutId(saved);g.load(TagValueInput.create(ProblemReporter.DISCARDING,level.registryAccess(),saved.buildResult()));
+        check(s.job==Job.FISHING_ROD&&g.getMainHandItem().isEnchanted()&&g.getMainHandItem().getDamageValue()==9&&rod.getDamageValue()==9,"enchanted rod assignment and durability survive actual golem save/reload");
+        BlockPos water=base.east(4);
+        for(BlockPos p:BlockPos.betweenClosed(water.offset(-2,-1,-2),water.offset(2,2,2)))
+            level.setBlock(p,p.getY()<=water.getY()?Blocks.WATER.defaultBlockState():Blocks.AIR.defaultBlockState(),2);
+        var lucky=AnimalJobs.fishingParams(level,g,water);
+        check(lucky.getLuck()==3,"Luck of the Sea III supplies three luck points to the actual fishing loot context");
+        g.setItemSlot(EquipmentSlot.MAINHAND,new ItemStack(Items.FISHING_ROD));var normal=AnimalJobs.fishingParams(level,g,water);
+        var loot=level.getServer().reloadableRegistries().getLootTable(net.minecraft.world.level.storage.loot.BuiltInLootTables.FISHING);
+        int normalTreasure=0,luckyTreasure=0;
+        for(int seed=1;seed<=1024;seed++) {
+            for(ItemStack item:loot.getRandomItems(normal,seed*0x9e3779b97f4a7c15L))if(treasure(item))normalTreasure++;
+            for(ItemStack item:loot.getRandomItems(lucky,seed*0x9e3779b97f4a7c15L))if(treasure(item))luckyTreasure++;
+        }
+        check(normalTreasure>0&&luckyTreasure>normalTreasure,"Luck of the Sea III increases vanilla open-water treasure results across 1024 paired seeded catches");
+        BlockPos small=base.south(4);level.setBlock(small,Blocks.WATER.defaultBlockState(),2);
+        g.setItemSlot(EquipmentSlot.MAINHAND,rod.copy());var closed=AnimalJobs.fishingParams(level,g,small);int closedTreasure=0;
+        for(int seed=1;seed<=128;seed++)for(ItemStack item:loot.getRandomItems(closed,seed*0x9e3779b97f4a7c15L))if(treasure(item))closedTreasure++;
+        check(closedTreasure==0,"Luck of the Sea never bypasses vanilla open-water treasure requirements");
+        g.setPos(Vec3.atBottomCenterOf(small.north()));chest.clearContent();s.clearTarget();s.target=small;
+        g.setItemSlot(EquipmentSlot.MAINHAND,new ItemStack(Items.FISHING_ROD));g.getRandom().setSeed(42);AnimalJobs.fish(level,g,s,ChestStorage.nearby(level,g));int plainDelay=s.cooldown;
+        for(int lure:List.of(1,3)) {
+            g.setItemSlot(EquipmentSlot.MAINHAND,enchanted(level,Items.FISHING_ROD,net.minecraft.world.item.enchantment.Enchantments.LURE,lure));g.getRandom().setSeed(42);s.target=small;
+            AnimalJobs.fish(level,g,s,ChestStorage.nearby(level,g));
+            check(s.cooldown==Math.max(20,plainDelay-lure*100),"Lure "+lure+" shortens a real catch cooldown by five seconds per level with a one-second floor");
+        }
+        for(int n=0;n<chest.getContainerSize();n++)chest.setItem(n,new ItemStack(Items.DIRT,64));chest.setItem(0,new ItemStack(Items.DIRT,63));s.target=small;
+        AnimalJobs.fish(level,g,s,ChestStorage.nearby(level,g));int pending=s.pending.stream().mapToInt(ItemStack::getCount).sum(),delay=s.cooldown;
+        check(pending>0&&delay>=20&&delay<=300,"blocked enchanted fishing preserves the rolled catch and applies the Lure cooldown");
+        g.tickCount=10;WorkerBrain.tick(level,g,s);
+        check(s.pending.stream().mapToInt(ItemStack::getCount).sum()==pending,"blocked storage never rerolls an enchanted catch");
+        chest.clearContent();s.cooldown=50;WorkerBrain.tick(level,g,s);int stored=0;for(int n=0;n<chest.getContainerSize();n++)stored+=chest.getItem(n).getCount();
+        check(s.pending.isEmpty()&&stored==pending,"enchanted fishing resumes by depositing the saved catch exactly once");
+        g.discard();helper.succeed();
+    }
+
+    private static boolean treasure(ItemStack item) {
+        return item.is(Items.ENCHANTED_BOOK)||item.is(Items.NAME_TAG)||item.is(Items.SADDLE)||item.is(Items.NAUTILUS_SHELL)
+            ||((item.is(Items.BOW)||item.is(Items.FISHING_ROD))&&item.isEnchanted());
+    }
+
 }

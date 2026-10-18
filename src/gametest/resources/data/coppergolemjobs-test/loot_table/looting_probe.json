@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:entity",
+  "pools": [
+    {
+      "rolls": 1,
+      "entries": [
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:diamond",
+          "modifier": {
+            "type": "minecraft:enchanted_count_increase",
+            "enchantment": "minecraft:looting",
+            "count": 1.0
+          }
+        }
+      ]
+    }
+  ]
+}

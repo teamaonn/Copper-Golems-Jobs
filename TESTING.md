@@ -1,4 +1,4 @@
-# Testing version 0.3.4
+# Testing version 0.3.5
 
 ## Automated checks
 
@@ -24,7 +24,7 @@ The regression suite exercises:
 
 These are headless tests with constructed fixtures and registered structure metadata, not a completed playtest on a full naturally generated Ocean Monument. Full-size terrain, guardians, player structures, and long-running performance still need in-game testing.
 
-`validation/gametest-results.xml` contains the final machine-generated report. The suite includes seven custom tests and Minecraft's built-in always-pass control. Individual assertions are listed in `validation/passed-checks.txt`.
+`validation/gametest-results.xml` contains the final machine-generated report. The suite includes eight custom tests and Minecraft's built-in always-pass control. Individual assertions are listed in `validation/passed-checks.txt`.
 
 The compiled jar is produced directly from these checked Java classes and the mod resources. Gradle resolved Loom 1.18.2, but its Unix-domain socket capability probe fails with Operation not permitted in this environment, so the Gradle lifecycle itself did not complete here. The supplied Gradle project uses the Fabric 26.3 setup and pinned Loom version; it is intended for your normal Windows build environment. No Minecraft or Fabric dependency binaries are bundled in the deliverables.
 
@@ -63,3 +63,9 @@ A constructed 320-log, 80-block-tall tree exercises discovery beyond the ordinar
 ## Ten-block giant-tree canopy regression (0.3.4)
 
 The netherite large-tree fixture now includes persistent leaves ten blocks from surveyed logs along horizontal, vertical, and diagonal directions, plus an eleven-block control. The ten-block leaves are collected and the control remains. Ordinary axe and wooden-axe jobs retain their original leaf range. Tests also resume a saved extended-canopy cursor and migrate an old three-block saved harvest back into canopy surveying. Canopy work limits new block reads to 4,096 and duplicate-position visits to 65,536 per work tick; overlapping scan cubes share a visited-position cache.
+
+## Enchanted combat and fishing regression (0.3.5)
+
+A new headless test assigns an enchanted sword through the player interaction callback, measures actual plain, Sharpness V and Smite V damage, and observes Fire Aspect II ignition and Knockback II movement. A deterministic test-only entity loot table proves Looting III reaches the actual death-loot path and deposits the exact bonus drops. It is packaged only in the test mod.
+
+The fishing checks assign a Lure III/Luck of the Sea III rod, save and reload the actual golem, compare 1,024 paired seeded vanilla open-water catches for improved treasure results, and verify 128 closed-water rolls still yield no treasure. Real casts verify the Lure I and III cooldown reductions and the one-second floor. Blocked catches retain their exact output and deposit it once after storage becomes available. Sword material still uses the existing six-damage base; enchantment bonuses are added on top. Sweeping attacks and tool wear remain outside these jobs.

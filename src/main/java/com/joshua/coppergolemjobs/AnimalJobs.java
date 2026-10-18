@@ -17,6 +17,7 @@ import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.projectile.FishingHook;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.level.storage.loot.BuiltInLootTables;
 import net.minecraft.world.level.storage.loot.LootParams;
 import net.minecraft.world.level.storage.loot.parameters.LootContextParamSets;
@@ -91,7 +92,18 @@ public final class AnimalJobs {
                 continue;
             }
             try (DropCapture ignored = new DropCapture(enemy, worker)) {
-                enemy.hurtServer(level, level.damageSources().mobAttack(golem), 6.0F);
+                // Keep the assigned enchanted weapon as the damage/loot source. Vanilla
+                // entity loot reads Looting from the attacking golem's actual equipment.
+                ItemStack weapon = golem.getMainHandItem();
+                var source = weapon.getDamageSource(golem);
+                float damage = EnchantmentHelper.modifyDamage(level, weapon, enemy, source, 6.0F);
+                Vec3 oldMovement = enemy.getDeltaMovement();
+                if (enemy.hurtServer(level, source, damage)) {
+                    float knockback = EnchantmentHelper.modifyKnockback(level, weapon, enemy, source, 0.0F) / 2.0F;
+                    golem.causeExtraKnockback(enemy, knockback, oldMovement, source, damage, true);
+                    EnchantmentHelper.doPostAttackEffectsWithItemSource(level, enemy, source, weapon);
+                    golem.setLastHurtMob(enemy);
+                }
             }
             if (!worker.pending.isEmpty()) {
                 ChestStorage.Transaction deposit = storage.plan();
@@ -109,6 +121,23 @@ public final class AnimalJobs {
                 && level.getFluidState(p).isSource() && level.getBlockState(p.above()).isAir());
         if (water == null) { WorkerBrain.wait(golem, worker, "No reachable fishing water in assignment chunk"); return; }
         if (!WorkerBrain.approach(level, golem, worker, water, true)) return;
+        LootParams params = fishingParams(level, golem, water);
+        List<ItemStack> catchItems = level.getServer().reloadableRegistries().getLootTable(BuiltInLootTables.FISHING).getRandomItems(params);
+        ChestStorage.Transaction plan = storage.plan();
+        if (!plan.add(catchItems)) {
+            // Keep this actual catch rather than rolling different loot while blocked.
+            worker.pending.addAll(catchItems);
+            worker.cooldown = fishingDelay(level, golem);
+            WorkerBrain.wait(golem, worker, "Chest needs room for the catch");
+            return;
+        }
+        if (!plan.commit()) return;
+        level.sendParticles(ParticleTypes.SPLASH, water.getX() + .5, water.getY() + 1, water.getZ() + .5, 5, .2, .1, .2, .02);
+        level.playSound(null, water, SoundEvents.FISHING_BOBBER_SPLASH, SoundSource.NEUTRAL, .5F, 1);
+        WorkerBrain.worked(golem, worker, fishingDelay(level, golem));
+    }
+
+    static LootParams fishingParams(ServerLevel level, CopperGolem golem, BlockPos water) {
         // A context-only bobber lets vanilla fishing predicates and biome loot work.
         FishingHook hook = new FishingHook(EntityTypes.FISHING_BOBBER, level);
         hook.setPos(Vec3.atCenterOf(water));
@@ -116,23 +145,17 @@ public final class AnimalJobs {
         boolean loaded = true;
         for (BlockPos p : BlockPos.betweenClosed(water.offset(-2, -1, -2), water.offset(2, 2, 2))) if (!WorkerBrain.loaded(level, p)) { loaded = false; break; }
         access.copperJobs$setOpenWater(loaded && access.copperJobs$calculateOpenWater(water));
-        LootParams params = new LootParams.Builder(level)
+        return new LootParams.Builder(level)
                 .withParameter(LootContextParams.ORIGIN, hook.position())
                 .withParameter(LootContextParams.THIS_ENTITY, hook)
                 .withParameter(LootContextParams.TOOL, golem.getMainHandItem())
+                .withLuck(EnchantmentHelper.getFishingLuckBonus(level, golem.getMainHandItem(), golem) + golem.getLuck())
                 .create(LootContextParamSets.FISHING);
-        List<ItemStack> catchItems = level.getServer().reloadableRegistries().getLootTable(BuiltInLootTables.FISHING).getRandomItems(params);
-        ChestStorage.Transaction plan = storage.plan();
-        if (!plan.add(catchItems)) {
-            // Keep this actual catch rather than rolling different loot while blocked.
-            worker.pending.addAll(catchItems);
-            worker.cooldown = 200 + golem.getRandom().nextInt(401);
-            WorkerBrain.wait(golem, worker, "Chest needs room for the catch");
-            return;
-        }
-        if (!plan.commit()) return;
-        level.sendParticles(ParticleTypes.SPLASH, water.getX() + .5, water.getY() + 1, water.getZ() + .5, 5, .2, .1, .2, .02);
-        level.playSound(null, water, SoundEvents.FISHING_BOBBER_SPLASH, SoundSource.NEUTRAL, .5F, 1);
-        WorkerBrain.worked(golem, worker, 200 + golem.getRandom().nextInt(401));
+    }
+
+    static int fishingDelay(ServerLevel level, CopperGolem golem) {
+        // Vanilla rod effects express Lure's reduction in seconds (five per level).
+        int reduction = (int) (EnchantmentHelper.getFishingTimeReduction(level, golem.getMainHandItem(), golem) * 20.0F);
+        return Math.max(20, 200 + golem.getRandom().nextInt(401) - reduction);
     }
 }

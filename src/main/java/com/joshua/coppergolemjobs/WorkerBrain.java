@@ -78,36 +78,47 @@ public final class WorkerBrain {
     }
 
     public static boolean inReach(ServerLevel level, CopperGolem golem, BlockPos target) {
-        Vec3 end = Vec3.atCenterOf(target);
-        if (golem.getEyePosition().distanceToSqr(end) > 9) return false;
-        BlockHitResult hit = level.clip(new ClipContext(golem.getEyePosition(), end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, golem));
-        return hit.getType() == HitResult.Type.MISS || hit.getBlockPos().equals(target);
+        return visibleFrom(level, golem, golem.getEyePosition(), target);
+    }
+
+    private static boolean visibleFrom(ServerLevel level, CopperGolem golem, Vec3 eye, BlockPos target) {
+        // A staircase can obscure the centre while leaving an entire mineable face exposed.
+        // Each ray still has to hit the target first: this never permits mining through walls.
+        for (double x : new double[]{.1, .5, .9}) for (double y : new double[]{.1, .5, .9}) for (double z : new double[]{.1, .5, .9}) {
+            Vec3 end = new Vec3(target.getX() + x, target.getY() + y, target.getZ() + z);
+            if (eye.distanceToSqr(end) > 9) continue;
+            BlockHitResult hit = level.clip(new ClipContext(eye, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, golem));
+            if (hit.getType() == HitResult.Type.MISS || hit.getBlockPos().equals(target)) return true;
+        }
+        return false;
     }
 
     public static boolean standable(ServerLevel level, CopperGolem golem, BlockPos pos) {
         if (!loaded(level, pos) || !loaded(level, pos.above()) || !loaded(level, pos.below())) return false;
         BlockState floor = level.getBlockState(pos.below());
-        return !floor.is(Blocks.MAGMA_BLOCK)
-                && !floor.getCollisionShape(level, pos.below()).isEmpty()
-                && floor.getCollisionShape(level, pos.below()).max(Direction.Axis.Y) >= .875
-                && level.noCollision(golem, golem.getBoundingBox().move(Vec3.atBottomCenterOf(pos).subtract(golem.position())))
-                && level.getFluidState(pos).isEmpty() && level.getFluidState(pos.below()).isEmpty();
+        var shape = floor.getCollisionShape(level, pos.below());
+        if (floor.is(Blocks.MAGMA_BLOCK) || shape.isEmpty() || !level.getFluidState(pos).isEmpty()
+                || !floor.getFluidState().isEmpty()) return false;
+        double floorTop = shape.max(Direction.Axis.Y);
+        Vec3 standing = new Vec3(pos.getX() + .5, pos.getY() - 1 + floorTop, pos.getZ() + .5);
+        return level.noCollision(golem, golem.getBoundingBox().move(standing.subtract(golem.position())));
     }
 
     public static boolean approach(ServerLevel level, CopperGolem golem, WorkerState state, BlockPos target, boolean scoped) {
         if (inReach(level, golem, target)) {
+            golem.getLookControl().setLookAt(target.getX() + .5, target.getY() + .5, target.getZ() + .5);
             state.stalledTicks = 0;
             state.recoveryAttempts = 0;
             return true;
         }
-        if (target.equals(state.target) && state.pathTicks >= 1200) {
-            state.skip(target, level.getGameTime() + 1200);
+        if (target.equals(state.target) && state.pathTicks >= 240) {
+            state.skip(target, level.getGameTime() + 100);
             wait(golem, state, "Work target could not be reached");
             return false;
         }
         state.status = "Walking to work";
         if (target.equals(state.target) && state.approach != null) {
-            if (!golem.getNavigation().isDone() && state.pathTicks < 1200) {
+            if (!golem.getNavigation().isDone() && state.pathTicks < 240) {
                 state.pathTicks += 10;
                 state.stalledTicks += 10;
                 if (state.progressCheckpoint == Vec3.ZERO) state.progressCheckpoint = golem.position();
@@ -126,7 +137,7 @@ public final class WorkerBrain {
             state.recoveryAttempts++;
             state.status = "Recalculating stalled path";
             if (state.recoveryAttempts >= 3) {
-                state.skip(target, level.getGameTime() + 1200);
+                state.skip(target, level.getGameTime() + 100);
                 state.status = "Skipping blocked target and continuing";
                 state.cooldown = 10;
                 return false;
@@ -139,9 +150,10 @@ public final class WorkerBrain {
         }
         state.approach = null;
         List<BlockPos> stands = new ArrayList<>();
-        for (int dy = -1; dy <= 1; dy++) for (Direction dir : Direction.Plane.HORIZONTAL) {
+        for (int dy = -2; dy <= 2; dy++) for (Direction dir : Direction.Plane.HORIZONTAL) {
             BlockPos pos = target.relative(dir).offset(0, dy, 0);
-            if ((!scoped || state.inWorkChunk(pos)) && standable(level, golem, pos)) stands.add(pos);
+            if ((!scoped || state.inWorkChunk(pos)) && standable(level, golem, pos)
+                    && visibleFrom(level, golem, Vec3.atBottomCenterOf(pos).add(0, golem.getEyeHeight(), 0), target)) stands.add(pos);
         }
         stands.sort(Comparator.comparingDouble(p -> p.distSqr(golem.blockPosition())));
         for (BlockPos pos : stands) {
@@ -161,7 +173,7 @@ public final class WorkerBrain {
         if (buildGlassPath(level, golem, state, target, scoped)) return false;
         wait(golem, state, "No reachable work target");
         // Retry on its own. Reassigning the job must never be required to wake it up.
-        state.skip(target, level.getGameTime() + 1200);
+        state.skip(target, level.getGameTime() + 100);
         state.cooldown = 10;
         return false;
     }
@@ -209,7 +221,7 @@ public final class WorkerBrain {
         if (!loaded(level, state.origin)) return null;
         for (BlockPos p : BlockPos.betweenClosed(x0, Math.max(level.getMinY(), golem.blockPosition().getY() - 6), z0,
                 x1, Math.min(level.getMaxY(), golem.blockPosition().getY() + 12), z1)) {
-            if (!state.skipped.containsKey(p) && valid.test(p)) candidates.add(p.immutable());
+            if (valid.test(p) && (!state.skipped.containsKey(p) || inReach(level, golem, p))) candidates.add(p.immutable());
         }
         candidates.sort(Comparator.comparingDouble(p -> p.distSqr(golem.blockPosition())));
         int attempts = 0;

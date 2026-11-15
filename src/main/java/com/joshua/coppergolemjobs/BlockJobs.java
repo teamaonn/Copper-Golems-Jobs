@@ -22,7 +22,6 @@ import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -182,7 +181,7 @@ public final class BlockJobs {
         navigation.stop();
         worker.approach = null;
         if ((!step.equals(failed) && startQuarryWalk(level, golem, worker, step))
-                || buildQuarryFoothold(level, golem, worker, step, failed)) {
+                || buildQuarryWalkway(level, golem, worker, step, failed, true)) {
             worker.status = "Building the quarry staircase";
             return;
         }
@@ -190,39 +189,27 @@ public final class BlockJobs {
         worker.cooldown = 20;
     }
 
-    static boolean buildQuarryFoothold(ServerLevel level, CopperGolem golem, WorkerState worker, BlockPos step, BlockPos failed) {
-        BlockPos here = golem.blockPosition();
-        int dy = Integer.compare(step.getY(), here.getY());
-        List<BlockPos> footholds = new ArrayList<>();
-        for (Direction direction : Direction.Plane.HORIZONTAL) {
-            BlockPos side = here.relative(direction);
-            footholds.add(side);
-            if (dy != 0) footholds.add(side.offset(0, dy, 0));
-        }
-        footholds.sort(Comparator.comparingInt(pos -> quarryRouteDistance(pos, step)));
-        for (BlockPos pos : footholds) {
+    static boolean buildQuarryWalkway(ServerLevel level, CopperGolem golem, WorkerState worker, BlockPos target,
+                                      BlockPos failed, boolean staircase) {
+        Set<BlockPos> rejected = new HashSet<>();
+        if (failed != null) rejected.add(failed);
+        for (int attempt = 0; attempt < 4; attempt++) {
+            BlockPos pos = QuarryWalkway.nextStep(level, golem, worker, target, rejected, staircase);
+            if (pos == null) return false;
             BlockPos floor = pos.below();
-            if (pos.equals(failed) || !worker.inWorkChunk(pos) || floor.equals(step) || floor.equals(step.above())
-                    || quarryRouteDistance(pos, step) >= quarryRouteDistance(here, step)) continue;
-            if (!WorkerBrain.loaded(level, floor) || !WorkerBrain.loaded(level, pos) || !WorkerBrain.loaded(level, pos.above())) continue;
             BlockState prior = level.getBlockState(floor);
-            boolean placed = prior.isAir() && level.getBlockState(pos).isAir() && level.getBlockState(pos.above()).isAir()
-                    && level.setBlock(floor, Blocks.COBBLESTONE.defaultBlockState(), Block.UPDATE_ALL);
+            boolean placed = prior.isAir() && level.setBlock(floor, Blocks.COBBLESTONE.defaultBlockState(), Block.UPDATE_ALL);
             if (WorkerBrain.standable(level, golem, pos) && startQuarryWalk(level, golem, worker, pos)) {
                 if (placed) worker.structuralBlocks.add(floor);
                 worker.pathTicks = 0;
                 worker.recoveryAttempts = 0;
-                worker.status = "Building a cobblestone path to " + step.toShortString();
+                worker.status = "Building a cobblestone walkway to " + target.toShortString();
                 return true;
             }
             if (placed) level.setBlock(floor, prior, Block.UPDATE_ALL);
+            rejected.add(pos);
         }
         return false;
-    }
-
-    private static int quarryRouteDistance(BlockPos from, BlockPos to) {
-        // Closing a height gap can require stepping to the side first.
-        return from.distManhattan(to) + Math.abs(from.getY() - to.getY());
     }
 
     private static boolean startQuarryWalk(ServerLevel level, CopperGolem golem, WorkerState worker, BlockPos position) {

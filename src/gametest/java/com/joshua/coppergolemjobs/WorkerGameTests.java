@@ -267,7 +267,7 @@ public final class WorkerGameTests {
         });
     }
 
-    @GameTest(maxTicks = 650, skyAccess = true, padding = 32)
+    @GameTest(maxTicks = 650, skyAccess = true, padding = 80)
     public void quarryReturnsToUnfinishedLayer(GameTestHelper helper) {
         ServerLevel level = helper.getLevel();
         BlockPos anchor = helper.absolutePos(new BlockPos(0, 20, 0));
@@ -284,7 +284,7 @@ public final class WorkerGameTests {
         BlockPos ore = layer.offset(10, 0, 5);
         level.setBlock(ore, Blocks.DIAMOND_ORE.defaultBlockState(), 3);
         level.setBlock(layer.east().below(), Blocks.BEDROCK.defaultBlockState(), 3);
-        BlockPos chestPos = ledge.south();
+        BlockPos chestPos = layer.offset(1, -14, 13);
         Block chestBlock = BuiltInRegistries.BLOCK.getValue(Identifier.withDefaultNamespace("copper_chest"));
         level.setBlock(chestPos, chestBlock.defaultBlockState(), 3);
         Container chest = (Container) level.getBlockEntity(chestPos);
@@ -297,6 +297,50 @@ public final class WorkerGameTests {
         helper.runAfterDelay(580, () -> {
             check(level.getBlockState(ore).isAir() && count(chest, Items.DIAMOND_ORE) == 1 && worker.cursor.equals(layer),
                     "live miner builds back up to unfinished work after falling fourteen blocks (" + worker.status + ", " + golem.blockPosition() + ")");
+            golem.discard();
+            helper.succeed();
+        });
+    }
+
+    @GameTest(maxTicks = 450, skyAccess = true, padding = 80)
+    public void quarryBuildsWalkwayAroundObstruction(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos anchor = helper.absolutePos(new BlockPos(0, 8, 0));
+        BlockPos layer = new BlockPos((anchor.getX() >> 4) << 4, anchor.getY(), (anchor.getZ() >> 4) << 4);
+        for (BlockPos center : List.of(layer, layer.north())) {
+            ChunkPos chunk = new ChunkPos(center.getX() >> 4, center.getZ() >> 4);
+            if (level.getChunkSource().updateChunkForced(chunk, true)) {
+                helper.runBeforeTestEnd(() -> level.getChunkSource().updateChunkForced(chunk, false));
+            }
+        }
+        for (BlockPos pos : BlockPos.betweenClosed(layer.offset(0, -6, -4), layer.offset(15, 3, 15))) {
+            level.setBlock(pos, pos.getY() == layer.getY() - 6 ? Blocks.STONE.defaultBlockState() : Blocks.AIR.defaultBlockState(), 2);
+        }
+        BlockPos ledge = layer.east(4);
+        level.setBlock(ledge.below(), Blocks.POLISHED_TUFF.defaultBlockState(), 3);
+        List<BlockPos> walls = List.of(ledge.east(), ledge.south(), ledge.west());
+        for (BlockPos wall : walls) for (int dy = -3; dy <= 3; dy++) {
+            level.setBlock(wall.offset(0, dy, 0), Blocks.BEDROCK.defaultBlockState(), 3);
+        }
+        BlockPos chestPos = layer.east(2).south(2);
+        Block chestBlock = BuiltInRegistries.BLOCK.getValue(Identifier.withDefaultNamespace("copper_chest"));
+        level.setBlock(chestPos, chestBlock.defaultBlockState(), 3);
+        Container chest = (Container) level.getBlockEntity(chestPos);
+        BlockPos ore = layer.east(11);
+        level.setBlock(ore, Blocks.DIAMOND_ORE.defaultBlockState(), 3);
+        level.setBlock(layer.east().below(), Blocks.BEDROCK.defaultBlockState(), 3);
+
+        CopperGolem golem = EntityTypes.COPPER_GOLEM.create(level, net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+        golem.setPos(Vec3.atBottomCenterOf(ledge));
+        WorkerState worker = ((WorkerAccess) golem).copperJobs$state();
+        worker.assign(Job.PICKAXE, layer, Direction.EAST);
+        level.addFreshEntity(golem);
+        helper.runAfterDelay(380, () -> {
+            check(level.getBlockState(ore).isAir() && count(chest, Items.DIAMOND_ORE) == 1,
+                    "live miner builds a walkway around the obstruction and mines across the gap (" + worker.status + ", " + golem.blockPosition() + ")");
+            check(worker.structuralBlocks.stream().filter(p -> !worker.inWorkChunk(p)).count() >= 2
+                    && walls.stream().allMatch(p -> level.getBlockState(p).is(Blocks.BEDROCK)),
+                    "walkway spans the chunk edge and leaves the obstruction intact");
             golem.discard();
             helper.succeed();
         });

@@ -81,7 +81,7 @@ public final class WorkerBrain {
         return visibleFrom(level, golem, golem.getEyePosition(), target);
     }
 
-    private static boolean visibleFrom(ServerLevel level, CopperGolem golem, Vec3 eye, BlockPos target) {
+    static boolean visibleFrom(ServerLevel level, CopperGolem golem, Vec3 eye, BlockPos target) {
         // A staircase can obscure the centre while leaving an entire mineable face exposed.
         // Each ray still has to hit the target first: this never permits mining through walls.
         for (double x : new double[]{.1, .5, .9}) for (double y : new double[]{.1, .5, .9}) for (double z : new double[]{.1, .5, .9}) {
@@ -103,7 +103,7 @@ public final class WorkerBrain {
         return level.noCollision(golem, golem.getBoundingBox().move(standing.subtract(golem.position())));
     }
 
-    private static Vec3 standingPosition(ServerLevel level, BlockPos pos) {
+    static Vec3 standingPosition(ServerLevel level, BlockPos pos) {
         BlockPos floor = pos.below();
         double top = level.getBlockState(floor).getCollisionShape(level, floor).max(Direction.Axis.Y);
         return Vec3.atBottomCenterOf(pos).add(0, top - 1, 0);
@@ -111,6 +111,7 @@ public final class WorkerBrain {
 
     public static boolean approach(ServerLevel level, CopperGolem golem, WorkerState state, BlockPos target, boolean scoped) {
         boolean quarry = state.job == Job.PICKAXE;
+        BlockPos failedStand = null;
         if (inReach(level, golem, target)) {
             golem.getLookControl().setLookAt(target.getX() + .5, target.getY() + .5, target.getZ() + .5);
             state.stalledTicks = 0;
@@ -142,6 +143,7 @@ public final class WorkerBrain {
             }
             // The path ended short or claimed to be active without moving for three seconds.
             golem.getNavigation().stop();
+            failedStand = state.approach;
             state.approach = null;
             state.stalledTicks = 0;
             state.progressCheckpoint = golem.position();
@@ -171,6 +173,7 @@ public final class WorkerBrain {
         }
         stands.sort(Comparator.comparingDouble(p -> p.distSqr(golem.blockPosition())));
         for (BlockPos pos : stands) {
+            if (quarry && pos.equals(failedStand)) continue;
             Path path = golem.getNavigation().createPath(pos, 0);
             if (path == null || !path.canReach()) continue;
             if (quarry) {
@@ -186,7 +189,7 @@ public final class WorkerBrain {
             state.progressCheckpoint = golem.position();
             return false;
         }
-        if (quarry ? BlockJobs.buildQuarryFoothold(level, golem, state, target, null)
+        if (quarry ? BlockJobs.buildQuarryWalkway(level, golem, state, target, failedStand, false)
                 : buildGlassPath(level, golem, state, target, scoped)) return false;
         wait(golem, state, quarry ? "No reachable work target at " + target.toShortString() : "No reachable work target");
         // Retry on its own. Reassigning the job must never be required to wake it up.

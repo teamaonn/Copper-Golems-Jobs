@@ -181,8 +181,16 @@ public final class BlockJobs {
         }
         navigation.stop();
         worker.approach = null;
-        if (!step.equals(failed) && startQuarryWalk(golem, worker, step)) return;
+        if ((!step.equals(failed) && startQuarryWalk(level, golem, worker, step))
+                || buildQuarryFoothold(level, golem, worker, step, failed)) {
+            worker.status = "Building the quarry staircase";
+            return;
+        }
+        WorkerBrain.wait(golem, worker, "No safe route to the quarry staircase at " + step.toShortString());
+        worker.cooldown = 20;
+    }
 
+    static boolean buildQuarryFoothold(ServerLevel level, CopperGolem golem, WorkerState worker, BlockPos step, BlockPos failed) {
         BlockPos here = golem.blockPosition();
         int dy = Integer.compare(step.getY(), here.getY());
         List<BlockPos> footholds = new ArrayList<>();
@@ -197,14 +205,19 @@ public final class BlockJobs {
             if (pos.equals(failed) || !worker.inWorkChunk(pos) || floor.equals(step) || floor.equals(step.above())
                     || quarryRouteDistance(pos, step) >= quarryRouteDistance(here, step)) continue;
             if (!WorkerBrain.loaded(level, floor) || !WorkerBrain.loaded(level, pos) || !WorkerBrain.loaded(level, pos.above())) continue;
-            if (level.getBlockState(floor).isAir() && level.getBlockState(pos).isAir() && level.getBlockState(pos.above()).isAir()) {
-                if (!level.setBlock(floor, Blocks.COBBLESTONE.defaultBlockState(), Block.UPDATE_ALL)) continue;
-                worker.structuralBlocks.add(floor);
+            BlockState prior = level.getBlockState(floor);
+            boolean placed = prior.isAir() && level.getBlockState(pos).isAir() && level.getBlockState(pos.above()).isAir()
+                    && level.setBlock(floor, Blocks.COBBLESTONE.defaultBlockState(), Block.UPDATE_ALL);
+            if (WorkerBrain.standable(level, golem, pos) && startQuarryWalk(level, golem, worker, pos)) {
+                if (placed) worker.structuralBlocks.add(floor);
+                worker.pathTicks = 0;
+                worker.recoveryAttempts = 0;
+                worker.status = "Building a cobblestone path to " + step.toShortString();
+                return true;
             }
-            if (WorkerBrain.standable(level, golem, pos) && startQuarryWalk(golem, worker, pos)) return;
+            if (placed) level.setBlock(floor, prior, Block.UPDATE_ALL);
         }
-        WorkerBrain.wait(golem, worker, "No safe route to the quarry staircase at " + step.toShortString());
-        worker.cooldown = 20;
+        return false;
     }
 
     private static int quarryRouteDistance(BlockPos from, BlockPos to) {
@@ -212,20 +225,14 @@ public final class BlockJobs {
         return from.distManhattan(to) + Math.abs(from.getY() - to.getY());
     }
 
-    private static boolean startQuarryWalk(CopperGolem golem, WorkerState worker, BlockPos position) {
+    private static boolean startQuarryWalk(ServerLevel level, CopperGolem golem, WorkerState worker, BlockPos position) {
         var navigation = golem.getNavigation();
         Path path = navigation.createPath(position, 0);
-        if (path == null || !path.canReach()) return false;
-        if (worker.inWorkChunk(golem.blockPosition())) {
-            for (int i = 0; i < path.getNodeCount(); i++) {
-                if (!worker.inWorkChunk(path.getNode(i).asBlockPos())) return false;
-            }
-        }
+        if (path == null || !path.canReach() || !WorkerBrain.quarryPathAllowed(level, worker, path)) return false;
         if (!navigation.moveTo(path, 1.0)) return false;
         worker.approach = position;
         worker.progressCheckpoint = golem.position();
         worker.stalledTicks = 0;
-        worker.status = "Building the quarry staircase";
         return true;
     }
 

@@ -99,12 +99,18 @@ public final class WorkerBrain {
         var shape = floor.getCollisionShape(level, pos.below());
         if (floor.is(Blocks.MAGMA_BLOCK) || shape.isEmpty() || !level.getFluidState(pos).isEmpty()
                 || !floor.getFluidState().isEmpty()) return false;
-        double floorTop = shape.max(Direction.Axis.Y);
-        Vec3 standing = new Vec3(pos.getX() + .5, pos.getY() - 1 + floorTop, pos.getZ() + .5);
+        Vec3 standing = standingPosition(level, pos);
         return level.noCollision(golem, golem.getBoundingBox().move(standing.subtract(golem.position())));
     }
 
+    private static Vec3 standingPosition(ServerLevel level, BlockPos pos) {
+        BlockPos floor = pos.below();
+        double top = level.getBlockState(floor).getCollisionShape(level, floor).max(Direction.Axis.Y);
+        return Vec3.atBottomCenterOf(pos).add(0, top - 1, 0);
+    }
+
     public static boolean approach(ServerLevel level, CopperGolem golem, WorkerState state, BlockPos target, boolean scoped) {
+        boolean quarry = state.job == Job.PICKAXE;
         if (inReach(level, golem, target)) {
             golem.getLookControl().setLookAt(target.getX() + .5, target.getY() + .5, target.getZ() + .5);
             state.stalledTicks = 0;
@@ -117,6 +123,11 @@ public final class WorkerBrain {
             return false;
         }
         state.status = "Walking to work";
+        if (quarry && target.equals(state.target) && golem.blockPosition().equals(state.approach)) {
+            golem.getNavigation().stop();
+            state.approach = null;
+            state.stalledTicks = 0;
+        }
         if (target.equals(state.target) && state.approach != null) {
             if (!golem.getNavigation().isDone() && state.pathTicks < 240) {
                 state.pathTicks += 10;
@@ -150,32 +161,48 @@ public final class WorkerBrain {
         }
         state.approach = null;
         List<BlockPos> stands = new ArrayList<>();
-        for (int dy = -2; dy <= 2; dy++) for (Direction dir : Direction.Plane.HORIZONTAL) {
-            BlockPos pos = target.relative(dir).offset(0, dy, 0);
-            if ((!scoped || state.inWorkChunk(pos)) && standable(level, golem, pos)
-                    && visibleFrom(level, golem, Vec3.atBottomCenterOf(pos).add(0, golem.getEyeHeight(), 0), target)) stands.add(pos);
+        int radius = quarry ? 2 : 1;
+        for (int dy = -2; dy <= 2; dy++) for (int dx = -radius; dx <= radius; dx++) for (int dz = -radius; dz <= radius; dz++) {
+            int distance = Math.abs(dx) + Math.abs(dz);
+            if (distance == 0 || distance > radius) continue;
+            BlockPos pos = target.offset(dx, dy, dz);
+            if ((!scoped || quarry || state.inWorkChunk(pos)) && standable(level, golem, pos)
+                    && visibleFrom(level, golem, standingPosition(level, pos).add(0, golem.getEyeHeight(), 0), target)) stands.add(pos);
         }
         stands.sort(Comparator.comparingDouble(p -> p.distSqr(golem.blockPosition())));
         for (BlockPos pos : stands) {
             Path path = golem.getNavigation().createPath(pos, 0);
             if (path == null || !path.canReach()) continue;
-            if (scoped) {
+            if (quarry) {
+                if (!quarryPathAllowed(level, state, path)) continue;
+            } else if (scoped) {
                 boolean outside = false;
                 for (int i = 0; i < path.getNodeCount(); i++) if (!state.inWorkChunk(path.getNode(i).asBlockPos())) { outside = true; break; }
                 if (outside) continue;
             }
-            golem.getNavigation().moveTo(path, 1.0);
+            if (!golem.getNavigation().moveTo(path, 1.0)) continue;
             state.approach = pos;
             state.stalledTicks = 0;
             state.progressCheckpoint = golem.position();
             return false;
         }
-        if (buildGlassPath(level, golem, state, target, scoped)) return false;
-        wait(golem, state, "No reachable work target");
+        if (quarry ? BlockJobs.buildQuarryFoothold(level, golem, state, target, null)
+                : buildGlassPath(level, golem, state, target, scoped)) return false;
+        wait(golem, state, quarry ? "No reachable work target at " + target.toShortString() : "No reachable work target");
         // Retry on its own. Reassigning the job must never be required to wake it up.
         state.skip(target, level.getGameTime() + 100);
         state.cooldown = 10;
         return false;
+    }
+
+    static boolean quarryPathAllowed(ServerLevel level, WorkerState state, Path path) {
+        for (int i = 0; i < path.getNodeCount(); i++) {
+            BlockPos pos = path.getNode(i).asBlockPos();
+            if (Math.abs((pos.getX() >> 4) - (state.origin.getX() >> 4)) > 1
+                    || Math.abs((pos.getZ() >> 4) - (state.origin.getZ() >> 4)) > 1
+                    || !loaded(level, pos)) return false;
+        }
+        return true;
     }
 
     /** Gives the worker one safe floor tile when vanilla navigation encounters a gap. */
@@ -219,8 +246,9 @@ public final class WorkerBrain {
         int x1 = state.job.trees() ? chunkX + 31 : chunkX + 15;
         int z1 = state.job.trees() ? chunkZ + 31 : chunkZ + 15;
         if (!loaded(level, state.origin)) return null;
-        for (BlockPos p : BlockPos.betweenClosed(x0, Math.max(level.getMinY(), golem.blockPosition().getY() - 6), z0,
-                x1, Math.min(level.getMaxY(), golem.blockPosition().getY() + 12), z1)) {
+        int lowY = state.job == Job.PICKAXE ? state.cursor.getY() : Math.max(level.getMinY(), golem.blockPosition().getY() - 6);
+        int highY = state.job == Job.PICKAXE ? state.cursor.getY() : Math.min(level.getMaxY(), golem.blockPosition().getY() + 12);
+        for (BlockPos p : BlockPos.betweenClosed(x0, lowY, z0, x1, highY, z1)) {
             if (valid.test(p) && (!state.skipped.containsKey(p) || inReach(level, golem, p))) candidates.add(p.immutable());
         }
         candidates.sort(Comparator.comparingDouble(p -> p.distSqr(golem.blockPosition())));

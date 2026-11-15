@@ -224,6 +224,84 @@ public final class WorkerGameTests {
         });
     }
 
+    @GameTest(maxTicks = 350, skyAccess = true, padding = 32)
+    public void quarryUsesWalkwayAcrossChunkBorder(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos anchor = helper.absolutePos(new BlockPos(0, 8, 0));
+        BlockPos layer = new BlockPos((anchor.getX() >> 4) << 4, anchor.getY(), (anchor.getZ() >> 4) << 4);
+        for (BlockPos center : List.of(layer, layer.north())) {
+            ChunkPos chunk = new ChunkPos(center.getX() >> 4, center.getZ() >> 4);
+            if (level.getChunkSource().updateChunkForced(chunk, true)) {
+                helper.runBeforeTestEnd(() -> level.getChunkSource().updateChunkForced(chunk, false));
+            }
+        }
+        for (BlockPos pos : BlockPos.betweenClosed(layer.offset(0, -4, -4), layer.offset(15, 3, 15))) {
+            level.setBlock(pos, pos.getY() == layer.getY() - 4 ? Blocks.STONE.defaultBlockState() : Blocks.AIR.defaultBlockState(), 2);
+        }
+        for (BlockPos pos : BlockPos.betweenClosed(layer.offset(3, -1, -2), layer.offset(12, -1, -1))) {
+            level.setBlock(pos, Blocks.POLISHED_TUFF.defaultBlockState(), 3);
+        }
+        BlockPos ledge = layer.east(4).north(2);
+        BlockPos chestPos = ledge.north();
+        Block chestBlock = BuiltInRegistries.BLOCK.getValue(Identifier.withDefaultNamespace("copper_chest"));
+        level.setBlock(chestPos, chestBlock.defaultBlockState(), 3);
+        Container chest = (Container) level.getBlockEntity(chestPos);
+        BlockPos ore = layer.east(11);
+        BlockPos outsideOre = ledge.east(2).north();
+        level.setBlock(ore, Blocks.DIAMOND_ORE.defaultBlockState(), 3);
+        level.setBlock(outsideOre, Blocks.DIAMOND_ORE.defaultBlockState(), 3);
+        level.setBlock(layer.east().below(), Blocks.BEDROCK.defaultBlockState(), 3);
+
+        CopperGolem golem = EntityTypes.COPPER_GOLEM.create(level, net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+        golem.setPos(Vec3.atBottomCenterOf(ledge));
+        WorkerState worker = ((WorkerAccess) golem).copperJobs$state();
+        worker.assign(Job.PICKAXE, layer, Direction.EAST);
+        level.addFreshEntity(golem);
+        helper.runAfterDelay(250, () -> {
+            check(level.getBlockState(ore).isAir() && count(chest, Items.DIAMOND_ORE) == 1,
+                    "live miner uses a walkway outside its assigned chunk to reach an edge block (" + worker.status + ")");
+            check(level.getBlockState(outsideOre).is(Blocks.DIAMOND_ORE) && worker.structuralBlocks.isEmpty(),
+                    "quarry navigation leaves neighboring ore and the existing walkway in place");
+            golem.discard();
+            helper.succeed();
+        });
+    }
+
+    @GameTest(maxTicks = 650, skyAccess = true, padding = 32)
+    public void quarryReturnsToUnfinishedLayer(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos anchor = helper.absolutePos(new BlockPos(0, 20, 0));
+        BlockPos layer = new BlockPos((anchor.getX() >> 4) << 4, anchor.getY(), (anchor.getZ() >> 4) << 4);
+        ChunkPos chunk = new ChunkPos(layer.getX() >> 4, layer.getZ() >> 4);
+        if (level.getChunkSource().updateChunkForced(chunk, true)) {
+            helper.runBeforeTestEnd(() -> level.getChunkSource().updateChunkForced(chunk, false));
+        }
+        for (BlockPos pos : BlockPos.betweenClosed(layer.below(16), layer.offset(15, 3, 15))) {
+            level.setBlock(pos, pos.getY() == layer.getY() - 16 ? Blocks.STONE.defaultBlockState() : Blocks.AIR.defaultBlockState(), 2);
+        }
+        BlockPos ledge = layer.offset(3, -14, 5);
+        level.setBlock(ledge.below(), Blocks.POLISHED_TUFF.defaultBlockState(), 3);
+        BlockPos ore = layer.offset(10, 0, 5);
+        level.setBlock(ore, Blocks.DIAMOND_ORE.defaultBlockState(), 3);
+        level.setBlock(layer.east().below(), Blocks.BEDROCK.defaultBlockState(), 3);
+        BlockPos chestPos = ledge.south();
+        Block chestBlock = BuiltInRegistries.BLOCK.getValue(Identifier.withDefaultNamespace("copper_chest"));
+        level.setBlock(chestPos, chestBlock.defaultBlockState(), 3);
+        Container chest = (Container) level.getBlockEntity(chestPos);
+
+        CopperGolem golem = EntityTypes.COPPER_GOLEM.create(level, net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+        golem.setPos(Vec3.atBottomCenterOf(ledge));
+        WorkerState worker = ((WorkerAccess) golem).copperJobs$state();
+        worker.assign(Job.PICKAXE, layer, Direction.EAST);
+        level.addFreshEntity(golem);
+        helper.runAfterDelay(580, () -> {
+            check(level.getBlockState(ore).isAir() && count(chest, Items.DIAMOND_ORE) == 1 && worker.cursor.equals(layer),
+                    "live miner builds back up to unfinished work after falling fourteen blocks (" + worker.status + ", " + golem.blockPosition() + ")");
+            golem.discard();
+            helper.succeed();
+        });
+    }
+
     @GameTest(maxTicks = 400, skyAccess = true)
     public void generatorAndDrain(GameTestHelper helper) {
         ServerLevel level=helper.getLevel();

@@ -17,6 +17,7 @@ import net.minecraft.world.entity.animal.golem.CopperGolem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.CocoaBlock;
@@ -37,7 +38,7 @@ public final class WorkerGameTests {
     }
     private static void step(ServerLevel level, CopperGolem g, WorkerState s) { g.tickCount = 10; s.cooldown = 0; WorkerBrain.tick(level, g, s); }
 
-    @GameTest(maxTicks = 300, skyAccess = true)
+    @GameTest(maxTicks = 300, skyAccess = true, padding = 32)
     public void jobsAndGates(GameTestHelper helper) {
         ServerLevel level = helper.getLevel();
         BlockPos base = helper.absolutePos(new BlockPos(2, 1, 2));
@@ -181,6 +182,48 @@ public final class WorkerGameTests {
             g.discard();helper.succeed();
         });
     }
+
+    @GameTest(maxTicks = 400, skyAccess = true, padding = 32)
+    public void quarryRecoversFromLowerLedge(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos anchor = helper.absolutePos(new BlockPos(0, 8, 0));
+        BlockPos layer = new BlockPos((anchor.getX() >> 4) << 4, anchor.getY(), (anchor.getZ() >> 4) << 4);
+        ChunkPos chunk = new ChunkPos(layer.getX() >> 4, layer.getZ() >> 4);
+        if (level.getChunkSource().updateChunkForced(chunk, true)) {
+            helper.runBeforeTestEnd(() -> level.getChunkSource().updateChunkForced(chunk, false));
+        }
+        BlockPos step = layer.east().below();
+        BlockPos ledge = step.east(5).below(2);
+        for (BlockPos pos : BlockPos.betweenClosed(layer.below(7), layer.offset(15, 3, 15))) {
+            level.setBlock(pos, pos.getY() == layer.getY() - 7 ? Blocks.STONE.defaultBlockState() : Blocks.AIR.defaultBlockState(), 2);
+        }
+        Block grate = BuiltInRegistries.BLOCK.getValue(Identifier.withDefaultNamespace("waxed_copper_grate"));
+        level.setBlock(ledge.below(), grate.defaultBlockState(), 3);
+        BlockPos chestPos = ledge.south();
+        Block chestBlock = BuiltInRegistries.BLOCK.getValue(Identifier.withDefaultNamespace("copper_chest"));
+        level.setBlock(chestPos, chestBlock.defaultBlockState(), 3);
+        Container chest = (Container) level.getBlockEntity(chestPos);
+        level.setBlock(step.below(), Blocks.COBBLESTONE.defaultBlockState(), 3);
+        BlockPos ore = step.south();
+        level.setBlock(ore, Blocks.DIAMOND_ORE.defaultBlockState(), 3);
+        level.setBlock(step.east().below(), Blocks.BEDROCK.defaultBlockState(), 3);
+
+        CopperGolem golem = EntityTypes.COPPER_GOLEM.create(level, net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+        golem.setPos(Vec3.atBottomCenterOf(ledge));
+        WorkerState worker = ((WorkerAccess) golem).copperJobs$state();
+        worker.assign(Job.PICKAXE, layer, Direction.EAST);
+        worker.structuralBlocks.add(step.below());
+        level.addFreshEntity(golem);
+        helper.runAfterDelay(300, () -> {
+            check(worker.cursor.equals(step) && level.getBlockState(ore).isAir() && count(chest, Items.DIAMOND_ORE) == 1,
+                    "live miner climbs back from a lower ledge, crosses a gap and resumes quarrying (" + worker.status + ")");
+            check(worker.structuralBlocks.size() > 1 && level.getBlockState(ledge.below()).is(grate),
+                    "quarry approach uses its own cobblestone and preserves the ledge");
+            golem.discard();
+            helper.succeed();
+        });
+    }
+
     @GameTest(maxTicks = 400, skyAccess = true)
     public void generatorAndDrain(GameTestHelper helper) {
         ServerLevel level=helper.getLevel();
@@ -544,7 +587,9 @@ public final class WorkerGameTests {
 
     @GameTest(maxTicks = 100, skyAccess = true)
     public void enchantedCombatAndFishing(GameTestHelper helper) {
-        ServerLevel level=helper.getLevel();BlockPos base=helper.absolutePos(new BlockPos(1500,5,1500));
+        ServerLevel level=helper.getLevel();BlockPos anchor=helper.absolutePos(new BlockPos(1500,5,1500));
+        // Keep the combat and fishing targets inside the assigned chunk for every test position.
+        BlockPos base=new BlockPos(((anchor.getX()>>4)<<4)+6,anchor.getY(),((anchor.getZ()>>4)<<4)+6);
         for(int dx=-1;dx<=1;dx++)for(int dz=-1;dz<=1;dz++)level.getChunk((base.getX()>>4)+dx,(base.getZ()>>4)+dz);
         for(BlockPos p:BlockPos.betweenClosed(base.offset(-5,-3,-5),base.offset(12,5,8)))
             level.setBlock(p,p.getY()<base.getY()?Blocks.STONE.defaultBlockState():Blocks.AIR.defaultBlockState(),2);

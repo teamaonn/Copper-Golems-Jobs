@@ -17,10 +17,12 @@ import net.minecraft.world.level.block.CocoaBlock;
 import net.minecraft.world.level.block.CropBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -85,6 +87,10 @@ public final class BlockJobs {
     /** Clears the assigned chunk one walkable layer at a time and spirals downward. */
     public static void quarry(ServerLevel level, CopperGolem golem, WorkerState worker, ChestStorage storage) {
         int y = worker.cursor.getY();
+        if (!hasQuarryBlocksAt(level, worker, y)) {
+            descendQuarry(level, golem, worker, storage);
+            return;
+        }
         BlockPos target = WorkerBrain.findBlock(level, golem, worker,
                 p -> p.getY() == y && quarryBlock(level, worker, p));
         if (target != null) {
@@ -94,8 +100,6 @@ public final class BlockJobs {
             if (breakIntoChest(level, golem, worker, storage, List.of(target), silk, true)) WorkerBrain.worked(golem, worker, 6);
             return;
         }
-        if (hasQuarryBlocksAt(level, worker, y)) return;
-        descendQuarry(level, golem, worker, storage);
     }
 
     private static boolean quarryBlock(ServerLevel level, WorkerState worker, BlockPos pos) {
@@ -123,24 +127,106 @@ public final class BlockJobs {
         if (level.getBlockState(step).is(Blocks.BEDROCK) || level.getBlockState(step.below()).is(Blocks.BEDROCK)) {
             WorkerBrain.wait(golem, worker, "Reached bedrock"); return;
         }
+        if (!step.equals(worker.target)) {
+            golem.getNavigation().stop();
+            worker.clearTarget();
+            worker.target = step;
+        }
         List<BlockPos> clear = new ArrayList<>();
         if (!level.getBlockState(step).isAir()) clear.add(step);
         if (!level.getBlockState(step.above()).isAir()) clear.add(step.above());
         BlockPos support = step.below();
-        if (!worker.structuralBlocks.contains(support)) clear.add(support);
-        ItemStack silk = new ItemStack(Items.NETHERITE_PICKAXE);
-        silk.enchant(level.registryAccess().lookupOrThrow(Registries.ENCHANTMENT).getOrThrow(Enchantments.SILK_TOUCH), 1);
-        if (!clear.isEmpty() && !breakIntoChest(level, golem, worker, storage, clear, silk, true)) return;
-        level.setBlock(support, Blocks.COBBLESTONE.defaultBlockState(), Block.UPDATE_ALL);
+        if (!worker.structuralBlocks.contains(support) || !level.getBlockState(support).is(Blocks.COBBLESTONE)) {
+            clear.add(support);
+        }
+        if (!clear.isEmpty()) {
+            for (BlockPos pos : clear) {
+                BlockState obstruction = level.getBlockState(pos);
+                if (obstruction.hasBlockEntity() || obstruction.getDestroySpeed(level, pos) < 0) {
+                    WorkerBrain.wait(golem, worker, "Quarry staircase is blocked at " + pos.toShortString());
+                    return;
+                }
+            }
+            ItemStack silk = new ItemStack(Items.NETHERITE_PICKAXE);
+            silk.enchant(level.registryAccess().lookupOrThrow(Registries.ENCHANTMENT).getOrThrow(Enchantments.SILK_TOUCH), 1);
+            if (!breakIntoChest(level, golem, worker, storage, clear, silk, true)) return;
+        }
+        if (!level.getBlockState(support).is(Blocks.COBBLESTONE)
+                && !level.setBlock(support, Blocks.COBBLESTONE.defaultBlockState(), Block.UPDATE_ALL)) {
+            WorkerBrain.wait(golem, worker, "Quarry staircase could not place its next step");
+            return;
+        }
         worker.structuralBlocks.add(support.immutable());
-        if (golem.distanceToSqr(Vec3.atBottomCenterOf(step)) < .8) {
+        if (golem.blockPosition().equals(step)) {
+            golem.getNavigation().stop();
             worker.cursor = step;
             worker.clearTarget();
             worker.status = "Quarrying layer " + nextY;
             return;
         }
-        golem.getNavigation().moveTo(step.getX() + .5, step.getY(), step.getZ() + .5, 1.0);
+        walkToQuarryStep(level, golem, worker, step);
+    }
+
+    private static void walkToQuarryStep(ServerLevel level, CopperGolem golem, WorkerState worker, BlockPos step) {
+        var navigation = golem.getNavigation();
+        BlockPos failed = null;
+        if (worker.approach != null && !golem.blockPosition().equals(worker.approach)) {
+            if (golem.position().distanceToSqr(worker.progressCheckpoint) >= .0625) {
+                worker.progressCheckpoint = golem.position();
+                worker.stalledTicks = 0;
+            }
+            worker.stalledTicks += 10;
+            if (!navigation.isDone() && worker.stalledTicks < 60) return;
+            failed = worker.approach;
+        }
+        navigation.stop();
+        worker.approach = null;
+        if (!step.equals(failed) && startQuarryWalk(golem, worker, step)) return;
+
+        BlockPos here = golem.blockPosition();
+        int dy = Integer.compare(step.getY(), here.getY());
+        List<BlockPos> footholds = new ArrayList<>();
+        for (Direction direction : Direction.Plane.HORIZONTAL) {
+            BlockPos side = here.relative(direction);
+            footholds.add(side);
+            if (dy != 0) footholds.add(side.offset(0, dy, 0));
+        }
+        footholds.sort(Comparator.comparingInt(pos -> quarryRouteDistance(pos, step)));
+        for (BlockPos pos : footholds) {
+            BlockPos floor = pos.below();
+            if (pos.equals(failed) || !worker.inWorkChunk(pos) || floor.equals(step) || floor.equals(step.above())
+                    || quarryRouteDistance(pos, step) >= quarryRouteDistance(here, step)) continue;
+            if (!WorkerBrain.loaded(level, floor) || !WorkerBrain.loaded(level, pos) || !WorkerBrain.loaded(level, pos.above())) continue;
+            if (level.getBlockState(floor).isAir() && level.getBlockState(pos).isAir() && level.getBlockState(pos.above()).isAir()) {
+                if (!level.setBlock(floor, Blocks.COBBLESTONE.defaultBlockState(), Block.UPDATE_ALL)) continue;
+                worker.structuralBlocks.add(floor);
+            }
+            if (WorkerBrain.standable(level, golem, pos) && startQuarryWalk(golem, worker, pos)) return;
+        }
+        WorkerBrain.wait(golem, worker, "No safe route to the quarry staircase at " + step.toShortString());
+        worker.cooldown = 20;
+    }
+
+    private static int quarryRouteDistance(BlockPos from, BlockPos to) {
+        // Closing a height gap can require stepping to the side first.
+        return from.distManhattan(to) + Math.abs(from.getY() - to.getY());
+    }
+
+    private static boolean startQuarryWalk(CopperGolem golem, WorkerState worker, BlockPos position) {
+        var navigation = golem.getNavigation();
+        Path path = navigation.createPath(position, 0);
+        if (path == null || !path.canReach()) return false;
+        if (worker.inWorkChunk(golem.blockPosition())) {
+            for (int i = 0; i < path.getNodeCount(); i++) {
+                if (!worker.inWorkChunk(path.getNode(i).asBlockPos())) return false;
+            }
+        }
+        if (!navigation.moveTo(path, 1.0)) return false;
+        worker.approach = position;
+        worker.progressCheckpoint = golem.position();
+        worker.stalledTicks = 0;
         worker.status = "Building the quarry staircase";
+        return true;
     }
 
     private static BlockPos quarryStep(WorkerState worker, int y) {

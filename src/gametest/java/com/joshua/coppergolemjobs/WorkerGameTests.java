@@ -80,7 +80,12 @@ public final class WorkerGameTests {
         for(int x=quarryX;x<quarryX+16;x++)for(int z=quarryZ;z<quarryZ+16;z++){BlockPos p=new BlockPos(x,base.getY(),z);if(!p.equals(chestPos))level.setBlock(p,Blocks.AIR.defaultBlockState(),3);}
         BlockPos ore=base.east();BlockPos second=base.south();
         level.setBlock(ore,Blocks.DIAMOND_ORE.defaultBlockState(),3);level.setBlock(second,Blocks.STONE.defaultBlockState(),3);
-        step(level,g,s);step(level,g,s);step(level,g,s);step(level,g,s);
+        BlockPos gap=base.east(3).below(), farGap=new BlockPos(quarryX+15,base.getY()-1,quarryZ+15);
+        level.setBlock(gap,Blocks.AIR.defaultBlockState(),3);level.setBlock(farGap,Blocks.AIR.defaultBlockState(),3);
+        step(level,g,s);
+        check(level.getBlockState(gap).is(Blocks.COBBLESTONE) && level.getBlockState(farGap).is(Blocks.COBBLESTONE)
+                && level.getBlockState(base.below()).is(Blocks.STONE),"quarry prepares the whole floor in one work tick and preserves existing blocks");
+        step(level,g,s);step(level,g,s);step(level,g,s);
         check(level.getBlockState(ore).isAir()&&level.getBlockState(second).isAir(),"pickaxe clears the assigned chunk layer instead of one staircase block");
         check(count(chest,Items.DIAMOND_ORE)==1 && count(chest,Items.DIAMOND)==0, "pickaxe uses Silk Touch");
         step(level,g,s);
@@ -91,12 +96,20 @@ public final class WorkerGameTests {
         BlockPos fluid=ore.east(); level.setBlock(fluid,Blocks.WATER.defaultBlockState(),3);
         step(level,g,s);
         check(level.getBlockState(fluid).is(Blocks.GLASS), "miner seals exposed water with glass");
+        check(level.getBlockState(gap).isAir() && level.getBlockState(farGap).isAir() && count(chest,Items.COBBLESTONE)==0,
+                "miner reclaims its previous floor after descending with no cobblestone payout");
+        var quarrySave=TagValueOutput.createWithContext(ProblemReporter.DISCARDING,level.registryAccess());
+        s.save(quarrySave);
+        s.load(TagValueInput.create(ProblemReporter.DISCARDING,level.registryAccess(),quarrySave.buildResult()));
         level.setBlock(ore,Blocks.AIR.defaultBlockState(),3);step(level,g,s);
-        check(level.getBlockState(fluid).isAir(),"quarry removes temporary water-sealing glass on its next pass");
+        check(level.getBlockState(fluid).isAir() && count(chest,Items.GLASS)==0,"quarry reabsorbs temporary water-sealing glass after save and reload");
         level.setBlock(ore,Blocks.STONE.defaultBlockState(),3);level.setBlock(fluid,Blocks.LAVA.defaultBlockState(),3);step(level,g,s);
         check(level.getBlockState(fluid).is(Blocks.GLASS), "miner seals exposed lava with glass");
         level.setBlock(ore,Blocks.AIR.defaultBlockState(),3);step(level,g,s);
-        check(level.getBlockState(fluid).isAir(),"quarry removes temporary lava-sealing glass on its next pass");
+        check(level.getBlockState(fluid).isAir() && count(chest,Items.GLASS)==0,"quarry reabsorbs temporary lava-sealing glass without a drop");
+        level.setBlock(ore,Blocks.GLASS.defaultBlockState(),3);step(level,g,s);
+        level.setBlock(ore,Blocks.COBBLESTONE.defaultBlockState(),3);step(level,g,s);
+        check(count(chest,Items.GLASS)==1 && count(chest,Items.COBBLESTONE)==1,"untracked glass and cobblestone still yield their normal items");
         for(int x=quarryX;x<quarryX+16;x++)for(int z=quarryZ;z<quarryZ+16;z++)if(!s.structuralBlocks.contains(new BlockPos(x,s.cursor.getY(),z)))level.setBlock(new BlockPos(x,s.cursor.getY(),z),Blocks.AIR.defaultBlockState(),3);
         BlockPos bedrockStep=new BlockPos(quarryX+2,base.getY()-2,quarryZ);level.setBlock(bedrockStep,Blocks.BEDROCK.defaultBlockState(),3);step(level,g,s);
         check(level.getBlockState(bedrockStep).is(Blocks.BEDROCK) && s.status.equals("Reached bedrock"), "bedrock stops mining");
@@ -219,6 +232,8 @@ public final class WorkerGameTests {
                     "live miner climbs back from a lower ledge, crosses a gap and resumes quarrying (" + worker.status + ")");
             check(worker.structuralBlocks.size() > 1 && level.getBlockState(ledge.below()).is(grate),
                     "quarry approach uses its own cobblestone and preserves the ledge");
+            check(level.getBlockState(chestPos.above()).isAir() && ChestStorage.nearby(level, golem).exists(),
+                    "temporary floor leaves the Copper Chest lid clear after descent");
             golem.discard();
             helper.succeed();
         });

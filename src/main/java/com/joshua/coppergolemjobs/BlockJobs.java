@@ -6,6 +6,7 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.FluidTags;
+import net.minecraft.world.Container;
 import net.minecraft.world.entity.animal.golem.CopperGolem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -86,6 +87,8 @@ public final class BlockJobs {
     /** Clears the assigned chunk one walkable layer at a time and spirals downward. */
     public static void quarry(ServerLevel level, CopperGolem golem, WorkerState worker, ChestStorage storage) {
         int y = worker.cursor.getY();
+        // Let a golem below its work climb out before covering the opening overhead.
+        if (golem.blockPosition().getY() >= y) prepareQuarryFloor(level, worker, y);
         if (!hasQuarryBlocksAt(level, worker, y)) {
             descendQuarry(level, golem, worker, storage);
             return;
@@ -99,6 +102,27 @@ public final class BlockJobs {
             if (breakIntoChest(level, golem, worker, storage, List.of(target), silk, true)) WorkerBrain.worked(golem, worker, 6);
             return;
         }
+    }
+
+    private static void prepareQuarryFloor(ServerLevel level, WorkerState worker, int y) {
+        if (worker.preparedQuarryLayer == y) return;
+        int x = (worker.origin.getX() >> 4) << 4;
+        int z = (worker.origin.getZ() >> 4) << 4;
+        if (!WorkerBrain.loaded(level, new BlockPos(x, y - 1, z))) return;
+        for (BlockPos pos : BlockPos.betweenClosed(x, y - 1, z, x + 15, y - 1, z + 15)) {
+            if (WorkerBrain.loaded(level, pos) && level.getBlockState(pos).isAir()
+                    && !(level.getBlockEntity(pos.below()) instanceof Container)
+                    && level.setBlock(pos, Blocks.COBBLESTONE.defaultBlockState(), Block.UPDATE_ALL)) {
+                worker.quarryFloor.add(pos.immutable());
+            }
+        }
+        // The miner is now above the replacement floor. Reclaim the retired one without loot.
+        worker.quarryFloor.removeIf(pos -> {
+            if (pos.getY() <= y - 1 || !WorkerBrain.loaded(level, pos)) return false;
+            return !level.getBlockState(pos).is(Blocks.COBBLESTONE) || worker.structuralBlocks.contains(pos)
+                    || level.setBlock(pos, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+        });
+        worker.preparedQuarryLayer = y;
     }
 
     private static boolean quarryBlock(ServerLevel level, WorkerState worker, BlockPos pos) {
@@ -295,17 +319,28 @@ public final class BlockJobs {
             }
         }
         List<ItemStack> output = new ArrayList<>();
-        for (Map.Entry<BlockPos, BlockState> entry : originals.entrySet()) output.addAll(Block.getDrops(entry.getValue(), level, entry.getKey(), null, golem, tool));
+        for (Map.Entry<BlockPos, BlockState> entry : originals.entrySet()) {
+            BlockPos pos = entry.getKey();
+            BlockState original = entry.getValue();
+            boolean ownCobble = original.is(Blocks.COBBLESTONE)
+                    && (worker.quarryFloor.contains(pos) || worker.structuralBlocks.contains(pos));
+            boolean ownGlass = original.is(Blocks.GLASS) && worker.fluidPlugs.contains(pos);
+            if (!ownCobble && !ownGlass) output.addAll(Block.getDrops(original, level, pos, null, golem, tool));
+        }
         // Waterlogged boundary blocks are collected too, instead of silently disappearing.
         for (BlockPos p : glass) output.addAll(Block.getDrops(level.getBlockState(p), level, p, null, golem, tool));
         ChestStorage.Transaction plan = storage.plan();
         if (!plan.add(output)) { WorkerBrain.wait(golem, worker, "Chest needs room for the whole drop"); return false; }
         if (!plan.unchanged()) return false;
-        for (BlockPos p : glass) level.setBlock(p, Blocks.GLASS.defaultBlockState(), Block.UPDATE_ALL);
+        for (BlockPos p : glass) {
+            if (level.setBlock(p, Blocks.GLASS.defaultBlockState(), Block.UPDATE_ALL)) worker.fluidPlugs.add(p.immutable());
+        }
         for (Map.Entry<BlockPos, BlockState> entry : originals.entrySet()) {
             if (entry.getValue().isAir()) continue;
             level.setBlock(entry.getKey(), Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
             worker.structuralBlocks.remove(entry.getKey());
+            worker.quarryFloor.remove(entry.getKey());
+            worker.fluidPlugs.remove(entry.getKey());
         }
         // All operations above are synchronous on the same server tick.
         if (!plan.commit()) worker.pending.addAll(output);

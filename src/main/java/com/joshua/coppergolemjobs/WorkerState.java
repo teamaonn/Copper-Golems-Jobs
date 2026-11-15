@@ -30,6 +30,9 @@ public final class WorkerState {
     public final List<ItemStack> pending = new ArrayList<>();
     public final Map<BlockPos, Long> skipped = new HashMap<>();
     public final Set<BlockPos> structuralBlocks = new HashSet<>();
+    public final Set<BlockPos> quarryFloor = new HashSet<>();
+    public final Set<BlockPos> fluidPlugs = new HashSet<>();
+    public int preparedQuarryLayer = Integer.MIN_VALUE;
     public BlockPos generator;
     public final DrainState drain = new DrainState();
     public final List<TreeFarmJob.Plot> treePlots = new ArrayList<>();
@@ -49,6 +52,9 @@ public final class WorkerState {
         cooldown = 0;
         skipped.clear();
         structuralBlocks.clear();
+        quarryFloor.clear();
+        fluidPlugs.clear();
+        preparedQuarryLayer = Integer.MIN_VALUE;
         generator = null;
         drain.reset();
         treePlots.clear();
@@ -81,6 +87,9 @@ public final class WorkerState {
         out.putInt("CopperJobsCooldown", cooldown);
         out.store("CopperJobsPending", ItemStack.CODEC.listOf(), pending);
         out.store("CopperJobsStructuralBlocks", BlockPos.CODEC.listOf(), new ArrayList<>(structuralBlocks));
+        out.store("CopperJobsQuarryFloor", BlockPos.CODEC.listOf(), new ArrayList<>(quarryFloor));
+        out.store("CopperJobsFluidPlugs", BlockPos.CODEC.listOf(), new ArrayList<>(fluidPlugs));
+        if (preparedQuarryLayer != Integer.MIN_VALUE) out.putInt("CopperJobsPreparedQuarryLayer", preparedQuarryLayer);
         if (generator != null) out.putLong("CopperJobsGenerator", generator.asLong());
         drain.save(out);
         out.store("CopperJobsTreePlots", TreeFarmJob.Plot.CODEC.listOf(), treePlots);
@@ -100,6 +109,11 @@ public final class WorkerState {
         pending.addAll(in.read("CopperJobsPending", ItemStack.CODEC.listOf()).orElse(List.of()));
         structuralBlocks.clear();
         structuralBlocks.addAll(in.read("CopperJobsStructuralBlocks", BlockPos.CODEC.listOf()).orElse(List.of()));
+        quarryFloor.clear();
+        quarryFloor.addAll(in.read("CopperJobsQuarryFloor", BlockPos.CODEC.listOf()).orElse(List.of()));
+        fluidPlugs.clear();
+        fluidPlugs.addAll(in.read("CopperJobsFluidPlugs", BlockPos.CODEC.listOf()).orElse(List.of()));
+        preparedQuarryLayer = in.getIntOr("CopperJobsPreparedQuarryLayer", Integer.MIN_VALUE);
         generator = in.getLong("CopperJobsGenerator").map(BlockPos::of).orElse(null);
         drain.load(in);
         treePlots.clear();

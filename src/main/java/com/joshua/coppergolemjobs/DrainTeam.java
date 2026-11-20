@@ -133,6 +133,25 @@ final class DrainTeam {
     boolean column(CopperGolem golem, WorkerState worker) {
         DrainState d = worker.drain;
         UUID id = golem.getUUID();
+        // A restart can merge partial member records into a completed stage without
+        // calling complete(). Recover that barrier before assigning more work.
+        if (d.completed.cardinality() == d.columns()) {
+            DrainState.Stage next = switch (d.stage) {
+                case SURVEY -> DrainState.Stage.CLEAR;
+                case CLEAR -> DrainState.Stage.SURFACE;
+                case FILL -> DrainState.Stage.WALLS;
+                case WALLS -> DrainState.Stage.VERIFY;
+                case VERIFY -> DrainState.Stage.REMOVE;
+                case REMOVE -> DrainState.Stage.RETURN;
+                default -> null;
+            };
+            if (next != null) {
+                advance(next);
+                worker.status = "Crew resumed: " + next.name().toLowerCase(java.util.Locale.ROOT);
+                return false;
+            }
+        }
+        claims.keySet().removeIf(d.completed::get);
         int selected = -1;
         for (var claim : claims.entrySet()) {
             if (claim.getValue().equals(id)) {
@@ -148,7 +167,10 @@ final class DrainTeam {
                 }
             }
             if (selected < 0) {
-                worker.status = "Waiting for the crew to finish this stage";
+                worker.status = "Waiting for the crew to finish this stage ("
+                        + d.stage.name().toLowerCase(java.util.Locale.ROOT) + ": "
+                        + d.completed.cardinality() + "/" + d.columns() + " columns; "
+                        + claims.size() + " assigned)";
                 return false;
             }
             claims.put(selected, id);

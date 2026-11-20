@@ -1,12 +1,12 @@
-# Copper Golem Jobs — Fabric 26.3 — 0.4.3 test build
+# Copper Golem Jobs — Fabric 26.3 — 0.4.4 test build
 
 Give a vanilla Copper Golem a job by right-clicking it with a vanilla tool. No fuel, power source, hearts, upgrades, or tool durability costs.
 
-[Download the 0.4.3 test jar](dist/copper-golem-jobs-fabric-26.3-0.4.3.jar).
+[Download the 0.4.4 test jar](dist/copper-golem-jobs-fabric-26.3-0.4.4.jar).
 
 ## Install
 
-Use Minecraft Java **26.3**, Fabric Loader **0.19.5 or newer**, and Fabric API **0.160.6+26.3**. Put `copper-golem-jobs-fabric-26.3-0.4.3.jar` into `mods` alongside Fabric API. Remove the earlier `copper-golems` test mod before installing this restart; the two mods deliberately cannot load together.
+Use Minecraft Java **26.3**, Fabric Loader **0.19.5 or newer**, and Fabric API **0.160.6+26.3**. Put `copper-golem-jobs-fabric-26.3-0.4.4.jar` into `mods` alongside Fabric API. Remove the earlier `copper-golems` test mod before installing this restart; the two mods deliberately cannot load together.
 
 The mod uses vanilla mobs, items, blocks, and visuals. The jar works in single-player and on a Fabric server. Begin in a separate Creative test world because several jobs excavate terrain automatically.
 
@@ -26,6 +26,8 @@ Assigned workers are immune to incoming damage while doing any job except sword 
 Quarry miners assigned to the same chunk share the current layer and ownership of construction blocks. Block workers reserve active targets so helpers can select other work. A helper can be reassigned without erasing the remaining crew's construction records.
 
 Drain workers above the same monument at the same surface height share a saved project. Add helpers anywhere on the sand cap at the original waterline with a Loyalty III trident. They join the loaded crew before the new-project water check and use an established starting platform for their return. They reserve separate columns and wait for the whole crew to finish a construction stage before advancing. All active crew members return to their own starting platforms before temporary access glass is removed. Paused or unloaded workers release their columns after five seconds, allowing the crew to continue. Resume an existing project by giving its worker the Loyalty III trident again.
+
+Completed column stages recover automatically after saved crew records merge, preventing the entire crew from waiting on an already finished stage. Waiting messages include the stage, completed columns and active assignments.
 
 Wall glass is placed remotely within the loaded project, including buried gaps blocked by terrain. Solid ground already counts as sealed. New surveys stop at the structure bottom, adding a permanent glass floor over deeper ravines. Existing projects keep their saved sand ownership and can finish their deeper walls without excavation.
 
@@ -122,7 +124,7 @@ C:\Gradle\bin\gradle.bat build
 
 Use **JDK 25** and **Gradle 9.5.1 or newer compatible with Loom 1.17**. The project pins **Loom 1.17.20**, uses the unobfuscated Minecraft 26.3 names, and does not use Yarn mappings. Gradle downloads the dependencies on the first build.
 
-The installable output is `build/libs/copper-golem-jobs-fabric-26.3-0.4.3.jar`. The `-sources.jar` is source code for developers, not the mod to install.
+The installable output is `build/libs/copper-golem-jobs-fabric-26.3-0.4.4.jar`. The `-sources.jar` is source code for developers, not the mod to install.
 
 Optional headless game tests:
 

@@ -412,6 +412,48 @@ public final class WorkerGameTests {
         first.discard();second.discard();helper.succeed();
     }
 
+    @GameTest(maxTicks = 200, skyAccess = true, padding = 80)
+    public void drainCrewBarrierRecovery(GameTestHelper helper) {
+        ServerLevel level=helper.getLevel();BlockPos base=helper.absolutePos(new BlockPos(4,8,4));
+        CopperGolem[] crew=new CopperGolem[64];WorkerState[] states=new WorkerState[64];
+        var stages=new DrainState.Stage[]{DrainState.Stage.SURVEY,DrainState.Stage.CLEAR,DrainState.Stage.FILL,
+                DrainState.Stage.WALLS,DrainState.Stage.VERIFY,DrainState.Stage.REMOVE};
+        var next=new DrainState.Stage[]{DrainState.Stage.CLEAR,DrainState.Stage.SURFACE,DrainState.Stage.WALLS,
+                DrainState.Stage.VERIFY,DrainState.Stage.REMOVE,DrainState.Stage.RETURN};
+        for(int n=0;n<stages.length;n++) {
+            // Separate sites keep each simulated restart independent of the live team cache.
+            BlockPos site=base.above(n*2);
+            for(int i=0;i<crew.length;i++) {
+                if(crew[i]==null) {
+                    crew[i]=EntityTypes.COPPER_GOLEM.create(level,net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+                    crew[i].setPos(Vec3.atBottomCenterOf(base.above()));crew[i].setNoAi(true);level.addFreshEntity(crew[i]);
+                    states[i]=((WorkerAccess)crew[i]).copperJobs$state();
+                }
+                WorkerState s=states[i];s.assign(Job.DRAIN,site,Direction.NORTH);
+                s.drain.begin(new net.minecraft.world.level.levelgen.structure.BoundingBox(site.getX()-1,site.getY()-4,site.getZ()-1,
+                        site.getX()+1,site.getY()-2,site.getZ()+1),site.getY());
+                s.drain.stage=stages[n];s.drain.bottomY=site.getY()-4;
+                java.util.Arrays.fill(s.drain.floors,site.getY()-4);
+                java.util.Arrays.fill(s.drain.sandTops,site.getY()-1);
+                s.drain.index=s.drain.columns();
+                // Individually saved workers each hold only a portion of the completed stage.
+                for(int c=i;c<s.drain.columns();c+=crew.length)s.drain.completed.set(c);
+                var out=TagValueOutput.createWithContext(ProblemReporter.DISCARDING,level.registryAccess());s.save(out);
+                s.load(TagValueInput.create(ProblemReporter.DISCARDING,level.registryAccess(),out.buildResult()));
+                DrainTeam.join(level,crew[i],s);
+            }
+            DrainTeam team=DrainTeam.join(level,crew[0],states[0]);
+            checkQuiet(states[0].drain.completed.cardinality()==states[0].drain.columns(),"saved crew completion records merge across 64 workers");
+            team.column(crew[0],states[0]);
+            for(WorkerState s:states) {
+                checkQuiet(s.drain.stage==next[n],"64-worker crew must advance after merged completion of "+stages[n]);
+                checkQuiet(s.drain.sandTops[0]==site.getY()-1,"stage recovery preserves sand ownership");
+            }
+        }
+        check(true,"64-worker drain crew resumes every completed column stage after save/reload");
+        for(CopperGolem g:crew)g.discard();helper.succeed();
+    }
+
     @GameTest(maxTicks = 500, skyAccess = true, padding = 80)
     public void cooperativeDrainAndLegacyGlass(GameTestHelper helper) {
         ServerLevel level=helper.getLevel();BlockPos base=helper.absolutePos(new BlockPos(0,8,0));
@@ -429,9 +471,9 @@ public final class WorkerGameTests {
         level.setBlock(chestPos,BuiltInRegistries.BLOCK.getValue(Identifier.withDefaultNamespace("copper_chest")).defaultBlockState(),3);
         Container chest=(Container)level.getBlockEntity(chestPos);
         var box=new net.minecraft.world.level.levelgen.structure.BoundingBox(base.getX()-1,base.getY()-4,base.getZ()-1,base.getX()+1,base.getY()-2,base.getZ()+1);
-        CopperGolem[] workers=new CopperGolem[2];WorkerState[] states=new WorkerState[2];
-        for(int i=0;i<2;i++) {
-            BlockPos home=base.offset(i*2-1,1,0);level.setBlock(home.below(),Blocks.COBBLESTONE.defaultBlockState(),3);
+        CopperGolem[] workers=new CopperGolem[64];WorkerState[] states=new WorkerState[64];
+        for(int i=0;i<workers.length;i++) {
+            BlockPos home=base.offset((i%2)*2-1,1,0);level.setBlock(home.below(),Blocks.COBBLESTONE.defaultBlockState(),3);
             workers[i]=EntityTypes.COPPER_GOLEM.create(level,net.minecraft.world.entity.EntitySpawnReason.COMMAND);
             workers[i].setPos(Vec3.atBottomCenterOf(home));workers[i].setNoAi(true);level.addFreshEntity(workers[i]);
             states[i]=((WorkerAccess)workers[i]).copperJobs$state();states[i].assign(Job.DRAIN,home,Direction.NORTH);
@@ -439,7 +481,7 @@ public final class WorkerGameTests {
         }
         boolean glassAdded=false,reloaded=false,parallel=false,barrier=false;
         for(int n=0;n<20000&&states[0].drain.stage!=DrainState.Stage.DONE;n++) {
-            for(int i=0;i<2;i++) {
+            for(int i=0;i<workers.length;i++) {
                 WorkerState s=states[i];CopperGolem g=workers[i];
                 if(s.drain.travel!=null)g.setPos(Vec3.atBottomCenterOf(s.drain.travel));
                 if(s.drain.stage==DrainState.Stage.FILL&&!glassAdded) {
@@ -467,11 +509,18 @@ public final class WorkerGameTests {
             }
             if(n==19999)throw new IllegalStateException("Cooperative drain stalled: "+states[0].status+" / "+states[1].status+" pos="+workers[0].position()+" travel="+states[0].drain.travel+" phase="+states[0].drain.routePhase+" stage="+states[0].drain.stage+" y="+states[0].drain.y+" index="+states[0].drain.index);
         }
-        check(parallel&&barrier&&glassAdded&&reloaded,"two drain workers split columns, replace legacy glass and resume a shared project after reload");
+        check(parallel&&barrier&&glassAdded&&reloaded,"64 drain workers split columns, replace legacy glass and resume a shared project after reload");
+        for(WorkerState state:states)checkQuiet(state.drain.stage==DrainState.Stage.DONE,"all 64 workers finish the shared project");
         check(states[0].drain.stage==DrainState.Stage.DONE&&states[1].drain.stage==DrainState.Stage.DONE,
                 "crew completes together after all sand and scaffolds are cleared");
         check(level.getBlockState(roof).is(Blocks.PRISMARINE)&&level.getBlockState(room).is(Blocks.WATER)&&count(chest,Items.SAND)==0,
                 "cooperative drain preserves monument rooms and creates no sand payout");
+        for(int c=0;c<states[0].drain.columns();c++) {
+            DrainState d=states[0].drain;
+            if(d.wall(d.column(c,d.surfaceY)))continue;
+            for(int y=d.floors[c]+1;y<=d.surfaceY;y++)
+                checkQuiet(level.getBlockState(d.column(c,y)).isAir(),"64-worker crew leaves no water or temporary sand above the surveyed exterior floor");
+        }
         for(CopperGolem golem:workers)golem.discard();helper.succeed();
     }
 

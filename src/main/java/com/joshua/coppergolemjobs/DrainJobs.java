@@ -39,6 +39,7 @@ public final class DrainJobs {
     public static void motion(ServerLevel level, CopperGolem g, WorkerState s) {
         DrainState d = s.drain;
         if (d.travel == null) return;
+        if (d.routePhase == 3) { DrainNavigation.motion(level,g,s); return; }
         if (d.routePhase == 0 && g.getY() < d.surfaceY + 1) {
             BlockPos lid = new BlockPos(g.blockPosition().getX(), d.surfaceY, g.blockPosition().getZ());
             if (d.scaffolds.contains(lid) && level.getBlockState(lid).is(Blocks.GLASS)) {
@@ -276,12 +277,6 @@ public final class DrainJobs {
         BlockState b=level.getBlockState(p);
         return b.is(Blocks.GLASS) || (!b.hasBlockEntity() && b.isCollisionShapeFullBlock(level,p) && b.getFluidState().isEmpty());
     }
-    private static BlockPos outside(DrainState d,BlockPos p) {
-        if(p.getX()==d.minX)return p.west();
-        if(p.getX()==d.maxX)return p.east();
-        return p.getZ()==d.minZ?p.north():p.south();
-    }
-
     /** Wall bottoms share the lowest surveyed floor, closing terrain dips at the perimeter. */
     private static void walls(ServerLevel level,CopperGolem g,WorkerState s,boolean verify,DrainTeam team) {
         DrainState d=s.drain;s.status=verify?"Checking the glass barrier":"Building exterior glass walls";
@@ -293,21 +288,7 @@ public final class DrainJobs {
             if(verify){team.advance(DrainState.Stage.WALLS);return;}
             BlockState b=level.getBlockState(p);
             if(!open(b)||plant(b)){WorkerBrain.wait(g,s,"Wall site obstructed; existing blocks left untouched");return;}
-            BlockPos stand=null;
-            BlockPos first=outside(d,p);
-            int dx=first.getX()-p.getX(),dz=first.getZ()-p.getZ();
-            for(int distance=1;distance<=4;distance++) {
-                BlockPos candidate=p.offset(dx*distance,0,dz*distance);
-                while(candidate.getY()<=d.surfaceY && !open(level.getBlockState(candidate)) && !d.scaffolds.contains(candidate))candidate=candidate.above();
-                boolean clear=true;
-                for(int h=candidate.getY();h<=d.surfaceY+2;h++) {
-                    BlockPos q=new BlockPos(candidate.getX(),h,candidate.getZ());
-                    if(!WorkerBrain.loaded(level,q)||(!d.scaffolds.contains(q)&&!level.getBlockState(q).getCollisionShape(level,q).isEmpty())){clear=false;break;}
-                }
-                if(clear){stand=candidate;break;}
-            }
-            if(stand==null){WorkerBrain.wait(g,s,"Clear access outside the glass wall to continue");return;}
-            if(!arrive(level,g,s,stand))return;
+            if(!DrainNavigation.arriveAtWall(level,g,s,p))return;
             if(!level.setBlock(p,Blocks.GLASS.defaultBlockState(),Block.UPDATE_ALL))return;
             d.scaffolds.remove(p);d.y++;g.swing(InteractionHand.MAIN_HAND, net.minecraft.world.item.component.SwingAnimation.DEFAULT);return;
         }

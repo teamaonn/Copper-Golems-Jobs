@@ -19,6 +19,7 @@ public final class DrainState {
     public java.util.BitSet completed = new java.util.BitSet();
     public int[] heights = new int[0];
     public transient BlockPos travel;
+    public transient BlockPos wallTarget;
     public transient int routePhase, stuck;
     public transient net.minecraft.world.phys.Vec3 checkpoint;
     public final transient java.util.ArrayDeque<BlockPos> route = new java.util.ArrayDeque<>();
@@ -50,7 +51,7 @@ public final class DrainState {
         stage = Stage.NEW; index = 0; y = 0;
         floors = new int[0]; sandTops = new int[0]; scaffolds = new LinkedHashSet<>();
         completed = new java.util.BitSet(); heights = new int[0];
-        travel = null; routePhase = 0; stuck = 0; checkpoint = null; route.clear();
+        travel = null; wallTarget = null; routePhase = 0; stuck = 0; checkpoint = null; route.clear();
     }
     public void next(Stage next) {
         stage = next; index = 0; y = surfaceY; travel = null; routePhase = 0; route.clear();

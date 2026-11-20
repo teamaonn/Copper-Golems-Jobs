@@ -465,7 +465,7 @@ public final class WorkerGameTests {
                     s.load(TagValueInput.create(ProblemReporter.DISCARDING,level.registryAccess(),out.buildResult()));reloaded=true;
                 }
             }
-            if(n==19999)throw new IllegalStateException("Cooperative drain stalled: "+states[0].status+" / "+states[1].status);
+            if(n==19999)throw new IllegalStateException("Cooperative drain stalled: "+states[0].status+" / "+states[1].status+" pos="+workers[0].position()+" travel="+states[0].drain.travel+" wall="+states[0].drain.wallTarget+" phase="+states[0].drain.routePhase+" stage="+states[0].drain.stage+" y="+states[0].drain.y+" index="+states[0].drain.index);
         }
         check(parallel&&barrier&&glassAdded&&reloaded,"two drain workers split columns, replace legacy glass and resume a shared project after reload");
         check(states[0].drain.stage==DrainState.Stage.DONE&&states[1].drain.stage==DrainState.Stage.DONE,
@@ -588,6 +588,44 @@ public final class WorkerGameTests {
         check(g.getY()>before+1,"drain swimming control raises the golem through exterior water");
         DrainJobs.stop(g,s);check(!g.isNoGravity()&&s.drain.travel==null,"pausing drain movement restores gravity");
         g.discard();helper.succeed();
+    }
+    @GameTest(maxTicks = 1200, skyAccess = true, padding = 80)
+    public void exteriorWallOverhang(GameTestHelper helper) {
+        ServerLevel level=helper.getLevel();
+        BlockPos base=helper.absolutePos(new BlockPos(4,8,4));
+        java.util.List<net.minecraft.world.level.ChunkPos> forced=new java.util.ArrayList<>();
+        for(int dx=-1;dx<=1;dx++)for(int dz=-1;dz<=1;dz++) {
+            var c=new net.minecraft.world.level.ChunkPos((base.getX()>>4)+dx,(base.getZ()>>4)+dz);
+            if(level.getChunkSource().updateChunkForced(c,true))forced.add(c);
+            level.getChunk(c.x(),c.z());
+        }
+        helper.runBeforeTestEnd(()->forced.forEach(c->level.getChunkSource().updateChunkForced(c,false)));
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-12,-7,-8),base.offset(8,3,8)))
+            level.setBlock(p,p.getY()==base.getY()-7?Blocks.STONE.defaultBlockState():
+                    p.getY()<=base.getY()?Blocks.WATER.defaultBlockState():Blocks.AIR.defaultBlockState(),2);
+        // Four outward columns have an overhang: no straight shaft reaches the work site.
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-7,-2,-5),base.offset(-4,-2,5)))
+            level.setBlock(p,Blocks.STONE.defaultBlockState(),2);
+        CopperGolem g=EntityTypes.COPPER_GOLEM.create(level,net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+        BlockPos home=base.offset(-4,1,0),wall=base.offset(-3,-5,0);
+        level.setBlock(home.below(),Blocks.COBBLESTONE.defaultBlockState(),2);
+        g.setPos(Vec3.atBottomCenterOf(home));g.setNoAi(true);level.addFreshEntity(g);
+        WorkerState s=((WorkerAccess)g).copperJobs$state();s.assign(Job.DRAIN,home,Direction.NORTH);
+        s.drain.begin(new net.minecraft.world.level.levelgen.structure.BoundingBox(base.getX()-1,base.getY()-7,base.getZ()-1,base.getX()+1,base.getY()-3,base.getZ()+1),base.getY());
+        s.drain.bottomY=base.getY()-7;
+        // Exercise the production wall navigation and collision movement without test teleports.
+        helper.onEachTick(()->{
+            if(DrainNavigation.arriveAtWall(level,g,s,wall)) {
+                level.setBlock(wall,Blocks.GLASS.defaultBlockState(),2);
+                check(WorkerBrain.inReach(level,g,wall),"wall worker swims around an underwater overhang to a visible placement position");
+                for(BlockPos p:BlockPos.betweenClosed(base.offset(-7,-2,-5),base.offset(-4,-2,5)))
+                    checkQuiet(level.getBlockState(p).is(Blocks.STONE),"wall navigation preserves the seabed overhang");
+                g.discard();helper.succeed();return;
+            }
+            DrainJobs.motion(level,g,s);
+            checkQuiet(g.getY()>s.drain.surfaceY || g.getX()<s.drain.minX || g.getX()>s.drain.maxX
+                    || g.getZ()<s.drain.minZ || g.getZ()>s.drain.maxZ,"underwater wall route stays outside the monument enclosure");
+        });
     }
     @GameTest(maxTicks = 12000, skyAccess = true, padding = 32)
     public void liveDrain(GameTestHelper helper) {

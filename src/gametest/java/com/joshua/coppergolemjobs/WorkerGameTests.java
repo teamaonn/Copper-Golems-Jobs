@@ -630,7 +630,23 @@ public final class WorkerGameTests {
         partnerState.assign(Job.DRAIN,partnerHome,Direction.NORTH);
         partnerState.drain.begin(new net.minecraft.world.level.levelgen.structure.BoundingBox(base.getX()-1,base.getY()-4,base.getZ()-1,
             base.getX()+1,base.getY()-2,base.getZ()+1),base.getY());
+        CopperGolem[] lateHelper=new CopperGolem[1];
         helper.onEachTick(()->{
+            if(lateHelper[0]==null && s.drain.stage==DrainState.Stage.FILL) {
+                for(int column=0;column<s.drain.columns();column++) {
+                    if(s.drain.sandTops[column]!=s.drain.surfaceY)continue;
+                    BlockPos sand=s.drain.column(column,s.drain.surfaceY);
+                    CopperGolem recruit=EntityTypes.COPPER_GOLEM.create(level,net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+                    recruit.setPos(Vec3.atBottomCenterOf(sand.above()));level.addFreshEntity(recruit);
+                    var player=helper.makeMockPlayer(net.minecraft.world.level.GameType.SURVIVAL);
+                    player.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND,
+                            enchanted(level,Items.TRIDENT,net.minecraft.world.item.enchantment.Enchantments.LOYALTY,3));
+                    net.fabricmc.fabric.api.event.player.UseEntityCallback.EVENT.invoker()
+                            .interact(player,level,net.minecraft.world.InteractionHand.MAIN_HAND,recruit,null);
+                    lateHelper[0]=recruit;
+                    break;
+                }
+            }
             if(helper.getTick()%1000==0)System.out.println("LIVE DRAIN "+helper.getTick()+" "+s.drain.stage+" "+s.drain.index+" "+s.drain.y+" "+s.status+" "+g.position()+" target="+s.drain.travel+" phase="+s.drain.routePhase+" route="+s.drain.route+" lid="+(s.drain.travel==null?"none":level.getBlockState(new BlockPos(s.drain.travel.getX(),s.drain.surfaceY,s.drain.travel.getZ()))) );
             checkQuiet(level.getBlockState(base.below(2)).is(Blocks.PRISMARINE),"live drain must preserve roof");
             if(s.drain.stage==DrainState.Stage.DONE) {
@@ -639,7 +655,14 @@ public final class WorkerGameTests {
                 check(count((Container)level.getBlockEntity(chestPos),Items.SAND)==0,"live drain creates no sand payout");
                 check(partnerState.drain.stage==DrainState.Stage.DONE&&partner.position().distanceToSqr(Vec3.atBottomCenterOf(partnerHome))<.5,
                         "second live drain worker completes the shared project and returns home without test teleports");
-                g.discard();partner.discard();helper.succeed();
+                check(lateHelper[0]!=null,"a helper was assigned after the sand cap was already present");
+                WorkerState joined=((WorkerAccess)lateHelper[0]).copperJobs$state();
+                check(joined.drain.stage==DrainState.Stage.DONE&&joined.drain.floors==s.drain.floors,
+                        "late helper joins a partially sand-covered monument through normal trident assignment and completes with the crew");
+                check((joined.origin.equals(s.origin)||joined.origin.equals(partnerState.origin))
+                        && lateHelper[0].position().distanceToSqr(Vec3.atBottomCenterOf(joined.origin))<.5,
+                        "late helper returns to an established platform after its sand footing is removed");
+                g.discard();partner.discard();lateHelper[0].discard();helper.succeed();
             }
         });
     }

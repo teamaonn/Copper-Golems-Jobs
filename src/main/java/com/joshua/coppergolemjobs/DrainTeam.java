@@ -19,6 +19,37 @@ final class DrainTeam {
     private final java.util.Set<UUID> returned = new java.util.HashSet<>();
     private DrainState progress;
 
+    static boolean joinExisting(ServerLevel level, CopperGolem golem, WorkerState worker) {
+        CopperGolem sponsor = null;
+        for (CopperGolem candidate : level.getEntitiesOfClass(CopperGolem.class, golem.getBoundingBox().inflate(150))) {
+            if (candidate == golem || !candidate.isAlive()) continue;
+            WorkerState other = ((WorkerAccess) candidate).copperJobs$state();
+            DrainState project = other.drain;
+            if (!project.active() || other.job != Job.DRAIN
+                    || worker.origin.getY() != project.surfaceY + 1
+                    || worker.origin.getX() < project.minX || worker.origin.getX() > project.maxX
+                    || worker.origin.getZ() < project.minZ || worker.origin.getZ() > project.maxZ) continue;
+            if (sponsor == null || project.stage.ordinal()
+                    > ((WorkerAccess) sponsor).copperJobs$state().drain.stage.ordinal()) sponsor = candidate;
+        }
+        if (sponsor == null) return false;
+        WorkerState existing = ((WorkerAccess) sponsor).copperJobs$state();
+        // Recover the shared project from a loaded crew member even after a server restart.
+        join(level, sponsor, existing);
+        DrainState source = existing.drain;
+        DrainState target = worker.drain;
+        target.minX = source.minX;
+        target.maxX = source.maxX;
+        target.minZ = source.minZ;
+        target.maxZ = source.maxZ;
+        target.surfaceY = source.surfaceY;
+        // The sand under a new helper disappears later. Return it to an established platform.
+        worker.origin = existing.origin;
+        join(level, golem, worker);
+        worker.status = "Joined the existing monument drain crew";
+        return true;
+    }
+
     static DrainTeam join(ServerLevel level, CopperGolem golem, WorkerState worker) {
         DrainState d = worker.drain;
         Site site = new Site(d.minX, d.maxX, d.minZ, d.maxZ, d.surfaceY);

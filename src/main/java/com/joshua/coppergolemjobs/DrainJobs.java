@@ -39,6 +39,15 @@ public final class DrainJobs {
     public static void motion(ServerLevel level, CopperGolem g, WorkerState s) {
         DrainState d = s.drain;
         if (d.travel == null) return;
+        if (d.routePhase == 0 && g.getY() < d.surfaceY + 1) {
+            BlockPos lid = new BlockPos(g.blockPosition().getX(), d.surfaceY, g.blockPosition().getZ());
+            if (d.scaffolds.contains(lid) && level.getBlockState(lid).is(Blocks.GLASS)) {
+                boolean underwater = d.stage == DrainState.Stage.CLEAR || d.stage == DrainState.Stage.WALLS;
+                if (level.setBlock(lid, (underwater ? Blocks.WATER : Blocks.AIR).defaultBlockState(), Block.UPDATE_ALL)) {
+                    d.scaffolds.remove(lid);
+                }
+            }
+        }
         Vec3 end = Vec3.atBottomCenterOf(d.travel);
         double horizontal = (g.getX()-end.x)*(g.getX()-end.x)+(g.getZ()-end.z)*(g.getZ()-end.z);
         Vec3 waypoint;
@@ -179,6 +188,7 @@ public final class DrainJobs {
     }
 
     private static void discover(ServerLevel level, CopperGolem g, WorkerState s) {
+        if (DrainTeam.joinExisting(level,g,s)) return;
         int surface=s.origin.getY()-1;
         if (level.getBlockState(s.origin.below()).getCollisionShape(level,s.origin.below()).isEmpty()) {
             WorkerBrain.wait(g,s,"Place the drain golem on a solid platform at water level");return;

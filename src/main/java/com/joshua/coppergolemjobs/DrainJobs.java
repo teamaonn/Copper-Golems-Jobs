@@ -39,7 +39,6 @@ public final class DrainJobs {
     public static void motion(ServerLevel level, CopperGolem g, WorkerState s) {
         DrainState d = s.drain;
         if (d.travel == null) return;
-        if (d.routePhase == 3) { DrainNavigation.motion(level,g,s); return; }
         if (d.routePhase == 0 && g.getY() < d.surfaceY + 1) {
             BlockPos lid = new BlockPos(g.blockPosition().getX(), d.surfaceY, g.blockPosition().getZ());
             if (d.scaffolds.contains(lid) && level.getBlockState(lid).is(Blocks.GLASS)) {
@@ -217,14 +216,16 @@ public final class DrainJobs {
     private static void survey(ServerLevel level, CopperGolem g, WorkerState s, DrainTeam team) {
         DrainState d=s.drain;s.status="Surveying monument exterior: "+d.index+"/"+d.columns();
         int floor=d.surfaceY;
-        while(floor>=Math.max(level.getMinY(),d.surfaceY-96)) {
+        int limit=Math.max(level.getMinY(),d.structureBottom==Integer.MIN_VALUE?d.surfaceY-96:d.structureBottom);
+        while(floor>=limit) {
             BlockPos p=d.column(d.index,floor);
             if(!WorkerBrain.loaded(level,p)){WorkerBrain.wait(g,s,"Waiting for survey chunks");return;}
             // Surface access glass is temporary and must not become the surveyed seabed.
             if(!open(level.getBlockState(p)) && !(d.scaffolds.contains(p)&&level.getBlockState(p).is(Blocks.GLASS)))break;
+            if(floor==limit && d.structureBottom!=Integer.MIN_VALUE)break;
             floor--;
         }
-        if(floor<Math.max(level.getMinY(),d.surfaceY-96)) { WorkerBrain.wait(g,s,"No seabed within 96 blocks; drain survey paused");return; }
+        if(floor<limit) { WorkerBrain.wait(g,s,"No seabed within 96 blocks; drain survey paused");return; }
         d.floors[d.index]=floor;d.bottomY=Math.min(d.bottomY,floor);
         team.complete(g,d,DrainState.Stage.CLEAR);
     }
@@ -232,7 +233,7 @@ public final class DrainJobs {
     private static void clear(ServerLevel level,CopperGolem g,WorkerState s,ChestStorage storage,DrainTeam team) {
         DrainState d=s.drain;s.status="Clearing exterior kelp and seagrass: "+d.index+"/"+d.columns();
         for(int budget=0;budget<128;budget++) {
-            if(d.y<=d.floors[d.index]){team.complete(g,d,DrainState.Stage.SURFACE);return;}
+            if(d.y<d.floors[d.index] || (d.y==d.floors[d.index] && d.y!=d.structureBottom)){team.complete(g,d,DrainState.Stage.SURFACE);return;}
             BlockPos p=d.column(d.index,d.y);BlockState b=level.getBlockState(p);
             if(!plant(b)){d.y--;continue;}
             if(!arrive(level,g,s,p))return;
@@ -254,6 +255,12 @@ public final class DrainJobs {
         }
         BlockPos top=d.column(d.index,d.surfaceY);
         if(!arrive(level,g,s,top.above()))return;
+        BlockPos base=d.column(d.index,d.floors[d.index]);
+        if(d.floors[d.index]==d.structureBottom && open(level.getBlockState(base))) {
+            // A ravine below the monument needs a permanent floor to hold sand and keep water out.
+            if(plant(level.getBlockState(base))) { WorkerBrain.wait(g,s,"Clear vegetation at the drain floor"); return; }
+            if(!level.setBlock(base,Blocks.GLASS.defaultBlockState(),Block.UPDATE_ALL))return;
+        }
         int next=d.sandTops[d.index]==Integer.MIN_VALUE?d.floors[d.index]+1:d.sandTops[d.index]+1;
         for(int n=0;n<8 && next<=d.surfaceY;n++,next++) {
             BlockPos p=d.column(d.index,next);BlockState b=level.getBlockState(p);
@@ -288,7 +295,10 @@ public final class DrainJobs {
             if(verify){team.advance(DrainState.Stage.WALLS);return;}
             BlockState b=level.getBlockState(p);
             if(!open(b)||plant(b)){WorkerBrain.wait(g,s,"Wall site obstructed; existing blocks left untouched");return;}
-            if(!DrainNavigation.arriveAtWall(level,g,s,p))return;
+            // Construction is project-scoped: terrain must never force player excavation.
+            // Remote placement also resumes legacy projects with deeper saved wall targets.
+            if(!WorkerBrain.loaded(level,p)){WorkerBrain.wait(g,s,"Waiting for wall chunks");return;}
+            stop(g,s);
             if(!level.setBlock(p,Blocks.GLASS.defaultBlockState(),Block.UPDATE_ALL))return;
             d.scaffolds.remove(p);d.y++;g.swing(InteractionHand.MAIN_HAND, net.minecraft.world.item.component.SwingAnimation.DEFAULT);return;
         }

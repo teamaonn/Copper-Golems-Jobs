@@ -13,13 +13,13 @@ public final class DrainState {
     public enum Stage { NEW, SURVEY, CLEAR, SURFACE, FILL, WALLS, VERIFY, REMOVE, RETURN, CLEANUP, DONE }
     public Stage stage = Stage.NEW;
     public int minX, maxX, minZ, maxZ, surfaceY, bottomY, index, y;
+    public int structureBottom = Integer.MIN_VALUE;
     public int[] floors = new int[0];
     public int[] sandTops = new int[0];
     public Set<BlockPos> scaffolds = new LinkedHashSet<>();
     public java.util.BitSet completed = new java.util.BitSet();
     public int[] heights = new int[0];
     public transient BlockPos travel;
-    public transient BlockPos wallTarget;
     public transient int routePhase, stuck;
     public transient net.minecraft.world.phys.Vec3 checkpoint;
     public final transient java.util.ArrayDeque<BlockPos> route = new java.util.ArrayDeque<>();
@@ -39,6 +39,7 @@ public final class DrainState {
         // One clear column between the monument footprint and the permanent wall.
         minX = monument.minX() - 2; maxX = monument.maxX() + 2;
         minZ = monument.minZ() - 2; maxZ = monument.maxZ() + 2;
+        structureBottom = monument.minY();
         surfaceY = surface; bottomY = surface; index = 0; y = surface;
         floors = new int[columns()]; sandTops = new int[columns()];
         heights = new int[columns()]; java.util.Arrays.fill(heights, Integer.MIN_VALUE);
@@ -48,10 +49,10 @@ public final class DrainState {
         stage = Stage.SURVEY;
     }
     public void reset() {
-        stage = Stage.NEW; index = 0; y = 0;
+        stage = Stage.NEW; index = 0; y = 0; structureBottom = Integer.MIN_VALUE;
         floors = new int[0]; sandTops = new int[0]; scaffolds = new LinkedHashSet<>();
         completed = new java.util.BitSet(); heights = new int[0];
-        travel = null; wallTarget = null; routePhase = 0; stuck = 0; checkpoint = null; route.clear();
+        travel = null; routePhase = 0; stuck = 0; checkpoint = null; route.clear();
     }
     public void next(Stage next) {
         stage = next; index = 0; y = surfaceY; travel = null; routePhase = 0; route.clear();
@@ -62,6 +63,7 @@ public final class DrainState {
         out.putString("DrainStage", stage.name());
         if (stage == Stage.NEW) return;
         out.putIntArray("DrainBounds", new int[]{minX,maxX,minZ,maxZ,surfaceY,bottomY,index,y});
+        out.putInt("DrainStructureBottom", structureBottom);
         out.putIntArray("DrainFloors", floors);
         out.putIntArray("DrainSandTops", sandTops);
         out.putIntArray("DrainCompleted", completed.stream().toArray());
@@ -76,6 +78,7 @@ public final class DrainState {
         int[] b = in.getIntArray("DrainBounds").orElse(new int[0]);
         if (b.length != 8 || b[1] < b[0] || b[3] < b[2] || (long)b[1]-b[0] > 100 || (long)b[3]-b[2] > 100) { reset(); return; }
         minX=b[0];maxX=b[1];minZ=b[2];maxZ=b[3];surfaceY=b[4];bottomY=b[5];index=b[6];y=b[7];
+        structureBottom=in.getIntOr("DrainStructureBottom", Integer.MIN_VALUE);
         floors=in.getIntArray("DrainFloors").orElse(new int[0]);
         sandTops=in.getIntArray("DrainSandTops").orElse(new int[0]);
         if (floors.length != columns() || sandTops.length != columns() || index < 0 || index > columns()) { reset(); return; }

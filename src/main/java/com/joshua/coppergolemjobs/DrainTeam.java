@@ -88,6 +88,7 @@ final class DrainTeam {
         p.minZ = d.minZ;
         p.maxZ = d.maxZ;
         p.surfaceY = d.surfaceY;
+        p.structureBottom = d.structureBottom;
         p.bottomY = d.bottomY;
         p.stage = d.stage;
         p.floors = d.floors;
@@ -120,6 +121,7 @@ final class DrainTeam {
             }
             d.stage = progress.stage;
             d.bottomY = progress.bottomY;
+            d.structureBottom = progress.structureBottom;
             d.floors = progress.floors;
             d.sandTops = progress.sandTops;
             d.scaffolds = progress.scaffolds;

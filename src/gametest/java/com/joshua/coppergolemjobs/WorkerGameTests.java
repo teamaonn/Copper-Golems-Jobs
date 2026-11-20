@@ -465,7 +465,7 @@ public final class WorkerGameTests {
                     s.load(TagValueInput.create(ProblemReporter.DISCARDING,level.registryAccess(),out.buildResult()));reloaded=true;
                 }
             }
-            if(n==19999)throw new IllegalStateException("Cooperative drain stalled: "+states[0].status+" / "+states[1].status+" pos="+workers[0].position()+" travel="+states[0].drain.travel+" wall="+states[0].drain.wallTarget+" phase="+states[0].drain.routePhase+" stage="+states[0].drain.stage+" y="+states[0].drain.y+" index="+states[0].drain.index);
+            if(n==19999)throw new IllegalStateException("Cooperative drain stalled: "+states[0].status+" / "+states[1].status+" pos="+workers[0].position()+" travel="+states[0].drain.travel+" phase="+states[0].drain.routePhase+" stage="+states[0].drain.stage+" y="+states[0].drain.y+" index="+states[0].drain.index);
         }
         check(parallel&&barrier&&glassAdded&&reloaded,"two drain workers split columns, replace legacy glass and resume a shared project after reload");
         check(states[0].drain.stage==DrainState.Stage.DONE&&states[1].drain.stage==DrainState.Stage.DONE,
@@ -589,43 +589,32 @@ public final class WorkerGameTests {
         DrainJobs.stop(g,s);check(!g.isNoGravity()&&s.drain.travel==null,"pausing drain movement restores gravity");
         g.discard();helper.succeed();
     }
-    @GameTest(maxTicks = 1200, skyAccess = true, padding = 80)
-    public void exteriorWallOverhang(GameTestHelper helper) {
-        ServerLevel level=helper.getLevel();
-        BlockPos base=helper.absolutePos(new BlockPos(4,8,4));
-        java.util.List<net.minecraft.world.level.ChunkPos> forced=new java.util.ArrayList<>();
-        for(int dx=-1;dx<=1;dx++)for(int dz=-1;dz<=1;dz++) {
-            var c=new net.minecraft.world.level.ChunkPos((base.getX()>>4)+dx,(base.getZ()>>4)+dz);
-            if(level.getChunkSource().updateChunkForced(c,true))forced.add(c);
-            level.getChunk(c.x(),c.z());
-        }
-        helper.runBeforeTestEnd(()->forced.forEach(c->level.getChunkSource().updateChunkForced(c,false)));
-        for(BlockPos p:BlockPos.betweenClosed(base.offset(-12,-7,-8),base.offset(8,3,8)))
-            level.setBlock(p,p.getY()==base.getY()-7?Blocks.STONE.defaultBlockState():
-                    p.getY()<=base.getY()?Blocks.WATER.defaultBlockState():Blocks.AIR.defaultBlockState(),2);
-        // Four outward columns have an overhang: no straight shaft reaches the work site.
-        for(BlockPos p:BlockPos.betweenClosed(base.offset(-7,-2,-5),base.offset(-4,-2,5)))
-            level.setBlock(p,Blocks.STONE.defaultBlockState(),2);
+    @GameTest(maxTicks = 100, skyAccess = true, padding = 80)
+    public void buriedLegacyWall(GameTestHelper helper) {
+        ServerLevel level=helper.getLevel();BlockPos base=helper.absolutePos(new BlockPos(4,30,4));
         CopperGolem g=EntityTypes.COPPER_GOLEM.create(level,net.minecraft.world.entity.EntitySpawnReason.COMMAND);
-        BlockPos home=base.offset(-4,1,0),wall=base.offset(-3,-5,0);
-        level.setBlock(home.below(),Blocks.COBBLESTONE.defaultBlockState(),2);
-        g.setPos(Vec3.atBottomCenterOf(home));g.setNoAi(true);level.addFreshEntity(g);
+        BlockPos home=base.above();g.setPos(Vec3.atBottomCenterOf(home));g.setNoAi(true);level.addFreshEntity(g);
         WorkerState s=((WorkerAccess)g).copperJobs$state();s.assign(Job.DRAIN,home,Direction.NORTH);
-        s.drain.begin(new net.minecraft.world.level.levelgen.structure.BoundingBox(base.getX()-1,base.getY()-7,base.getZ()-1,base.getX()+1,base.getY()-3,base.getZ()+1),base.getY());
-        s.drain.bottomY=base.getY()-7;
-        // Exercise the production wall navigation and collision movement without test teleports.
-        helper.onEachTick(()->{
-            if(DrainNavigation.arriveAtWall(level,g,s,wall)) {
-                level.setBlock(wall,Blocks.GLASS.defaultBlockState(),2);
-                check(WorkerBrain.inReach(level,g,wall),"wall worker swims around an underwater overhang to a visible placement position");
-                for(BlockPos p:BlockPos.betweenClosed(base.offset(-7,-2,-5),base.offset(-4,-2,5)))
-                    checkQuiet(level.getBlockState(p).is(Blocks.STONE),"wall navigation preserves the seabed overhang");
-                g.discard();helper.succeed();return;
-            }
-            DrainJobs.motion(level,g,s);
-            checkQuiet(g.getY()>s.drain.surfaceY || g.getX()<s.drain.minX || g.getX()>s.drain.maxX
-                    || g.getZ()<s.drain.minZ || g.getZ()>s.drain.maxZ,"underwater wall route stays outside the monument enclosure");
-        });
+        s.drain.begin(new net.minecraft.world.level.levelgen.structure.BoundingBox(base.getX()-1,base.getY()-4,base.getZ()-1,base.getX()+1,base.getY()-2,base.getZ()+1),base.getY());
+        s.drain.structureBottom=Integer.MIN_VALUE;s.drain.bottomY=base.getY()-22;
+        s.drain.stage=DrainState.Stage.WALLS;
+        java.util.Arrays.fill(s.drain.floors,s.drain.bottomY);
+        s.drain.completed.set(1,s.drain.columns());
+        var saved=TagValueOutput.createWithContext(ProblemReporter.DISCARDING,level.registryAccess());s.save(saved);
+        var legacy=saved.buildResult();legacy.remove("DrainStructureBottom");
+        s.load(TagValueInput.create(ProblemReporter.DISCARDING,level.registryAccess(),legacy));
+        check(s.drain.structureBottom==Integer.MIN_VALUE&&s.drain.bottomY==base.getY()-22,
+                "pre-update saves resume with their existing wall depth and sand records");
+        BlockPos target=s.drain.column(0,s.drain.bottomY+1);
+        for(BlockPos p:BlockPos.betweenClosed(target.offset(-3,-1,-3),target.offset(3,3,3)))
+            level.setBlock(p,Blocks.STONE.defaultBlockState(),2);
+        level.setBlock(target,Blocks.WATER.defaultBlockState(),2);
+        Vec3 before=g.position();
+        DrainJobs.work(level,g,s,ChestStorage.nearby(level,g));
+        check(level.getBlockState(target).is(Blocks.GLASS),"legacy buried wall gap is sealed remotely without excavating twenty blocks");
+        check(g.position().equals(before)&&!WorkerBrain.inReach(level,g,target),"remote construction does not move or teleport the worker to the buried target");
+        check(level.getBlockState(target.west()).is(Blocks.STONE),"solid terrain is preserved beside the buried wall");
+        g.discard();helper.succeed();
     }
     @GameTest(maxTicks = 12000, skyAccess = true, padding = 32)
     public void liveDrain(GameTestHelper helper) {
@@ -641,11 +630,11 @@ public final class WorkerGameTests {
         }
         helper.runBeforeTestEnd(()->forced.forEach(c->level.getChunkSource().updateChunkForced(c,false)));
 
-        for(BlockPos p:BlockPos.betweenClosed(base.offset(-5,-4,-5),base.offset(5,3,5)))
-            level.setBlock(p,p.getY()==base.getY()-4?Blocks.STONE.defaultBlockState():
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-5,-24,-5),base.offset(5,3,5)))
+            level.setBlock(p,p.getY()==base.getY()-24?Blocks.STONE.defaultBlockState():
                 p.getY()<=base.getY()?Blocks.WATER.defaultBlockState():Blocks.AIR.defaultBlockState(),2);
         // Contain the artificial ocean so its flowing water cannot spill into adjacent tests.
-        for(BlockPos p:BlockPos.betweenClosed(base.offset(-5,-4,-5),base.offset(5,0,5)))
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-5,-24,-5),base.offset(5,0,5)))
             if(Math.abs(p.getX()-base.getX())==5||Math.abs(p.getZ()-base.getZ())==5)
                 level.setBlock(p,Blocks.GLASS.defaultBlockState(),2);
         for(BlockPos p:BlockPos.betweenClosed(base.offset(-1,-3,-1),base.offset(1,-2,1)))
@@ -691,6 +680,13 @@ public final class WorkerGameTests {
                 check(g.position().distanceToSqr(Vec3.atBottomCenterOf(base.above()))<.5,"live drain walks, swims, finishes and returns home without test teleports");
                 check(level.getBlockState(base.below(3)).is(Blocks.WATER),"live drain keeps sealed interior water intact through fluid ticks");
                 check(count((Container)level.getBlockEntity(chestPos),Items.SAND)==0,"live drain creates no sand payout");
+                check(level.getBlockState(base.offset(2,-4,0)).is(Blocks.GLASS)
+                        &&level.getBlockState(base.offset(2,-5,0)).is(Blocks.WATER),
+                        "ravine is sealed at the monument base while deeper water stays untouched");
+                check(s.drain.bottomY==base.getY()-4,"ravine does not lower the drain depth below the structure");
+                var saved=TagValueOutput.createWithContext(ProblemReporter.DISCARDING,level.registryAccess());s.save(saved);
+                WorkerState resumed=new WorkerState();resumed.load(TagValueInput.create(ProblemReporter.DISCARDING,level.registryAccess(),saved.buildResult()));
+                check(resumed.drain.structureBottom==base.getY()-4,"structure bottom survives save and reload");
                 check(partnerState.drain.stage==DrainState.Stage.DONE&&partner.position().distanceToSqr(Vec3.atBottomCenterOf(partnerHome))<.5,
                         "second live drain worker completes the shared project and returns home without test teleports");
                 check(lateHelper[0]!=null,"a helper was assigned after the sand cap was already present");

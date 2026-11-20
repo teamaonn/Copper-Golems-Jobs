@@ -138,6 +138,7 @@ public final class DrainJobs {
     public static void work(ServerLevel level, CopperGolem g, WorkerState s, ChestStorage storage) {
         DrainState d=s.drain;
         if (d.stage == DrainState.Stage.NEW) { discover(level,g,s); return; }
+        DrainTeam team=DrainTeam.join(level,g,s);
         if (d.stage == DrainState.Stage.DONE) { WorkerBrain.wait(g,s,"Monument exterior drained; project complete"); return; }
         // No force-loading: hold progress until the whole footprint is loaded again.
         for (BlockPos corner : List.of(new BlockPos(d.minX,d.surfaceY,d.minZ),new BlockPos(d.maxX,d.surfaceY,d.minZ),
@@ -149,23 +150,31 @@ public final class DrainJobs {
                 WorkerBrain.wait(g,s,"Waiting for monument chunks to load");return;
             }
         }
-        switch(d.stage) {
-            case SURVEY -> survey(level,g,s);
-            case CLEAR -> clear(level,g,s,storage);
-            case SURFACE -> {
-                s.status="Returning to starting platform before sand filling";
-                if (arrive(level,g,s,s.origin)) d.next(DrainState.Stage.FILL);
+        for(int budget=0;budget<32;budget++) {
+            if (switch(d.stage) { case SURVEY, CLEAR, FILL, WALLS, VERIFY, REMOVE -> !team.column(g,s); default -> false; }) return;
+            DrainState.Stage before=d.stage;
+            int column=d.index;
+            switch(d.stage) {
+                case SURVEY -> survey(level,g,s,team);
+                case CLEAR -> clear(level,g,s,storage,team);
+                case SURFACE -> {
+                    s.status="Returning to starting platform before sand filling";
+                    if (arrive(level,g,s,s.origin)) team.home(g,DrainState.Stage.FILL);
+                }
+                case FILL -> fill(level,g,s,team);
+                case WALLS -> walls(level,g,s,false,team);
+                case VERIFY -> walls(level,g,s,true,team);
+                case REMOVE -> remove(level,g,s,team);
+                case RETURN -> {
+                    s.status="Returning to starting platform";
+                    if (arrive(level,g,s,s.origin)) team.home(g,DrainState.Stage.CLEANUP);
+                }
+                case CLEANUP -> cleanup(level,g,s,team);
+                default -> {}
             }
-            case FILL -> fill(level,g,s);
-            case WALLS -> walls(level,g,s,false);
-            case VERIFY -> walls(level,g,s,true);
-            case REMOVE -> remove(level,g,s);
-            case RETURN -> {
-                s.status="Returning to starting platform";
-                if (arrive(level,g,s,s.origin)) d.next(DrainState.Stage.CLEANUP);
-            }
-            case CLEANUP -> cleanup(level,g,s);
-            default -> {}
+            team.checkpoint(d);
+            if(d.stage==before && d.index==column) return;
+            if(d.stage==DrainState.Stage.DONE)return;
         }
     }
 
@@ -194,26 +203,25 @@ public final class DrainJobs {
         WorkerBrain.wait(g,s,"No generated Ocean Monument beneath the starting platform");
     }
 
-    private static void survey(ServerLevel level, CopperGolem g, WorkerState s) {
+    private static void survey(ServerLevel level, CopperGolem g, WorkerState s, DrainTeam team) {
         DrainState d=s.drain;s.status="Surveying monument exterior: "+d.index+"/"+d.columns();
-        for(int budget=0;budget<32 && d.index<d.columns();budget++,d.index++) {
-            int floor=d.surfaceY;
-            while(floor>=Math.max(level.getMinY(),d.surfaceY-96)) {
-                BlockPos p=d.column(d.index,floor);
-                if(!WorkerBrain.loaded(level,p)){WorkerBrain.wait(g,s,"Waiting for survey chunks");return;}
-                if(!open(level.getBlockState(p)))break;
-                floor--;
-            }
-            if(floor<Math.max(level.getMinY(),d.surfaceY-96)) { WorkerBrain.wait(g,s,"No seabed within 96 blocks; drain survey paused");return; }
-            d.floors[d.index]=floor;d.bottomY=Math.min(d.bottomY,floor);
+        int floor=d.surfaceY;
+        while(floor>=Math.max(level.getMinY(),d.surfaceY-96)) {
+            BlockPos p=d.column(d.index,floor);
+            if(!WorkerBrain.loaded(level,p)){WorkerBrain.wait(g,s,"Waiting for survey chunks");return;}
+            // Surface access glass is temporary and must not become the surveyed seabed.
+            if(!open(level.getBlockState(p)) && !(d.scaffolds.contains(p)&&level.getBlockState(p).is(Blocks.GLASS)))break;
+            floor--;
         }
-        if(d.index==d.columns())d.next(DrainState.Stage.CLEAR);
+        if(floor<Math.max(level.getMinY(),d.surfaceY-96)) { WorkerBrain.wait(g,s,"No seabed within 96 blocks; drain survey paused");return; }
+        d.floors[d.index]=floor;d.bottomY=Math.min(d.bottomY,floor);
+        team.complete(g,d,DrainState.Stage.CLEAR);
     }
 
-    private static void clear(ServerLevel level,CopperGolem g,WorkerState s,ChestStorage storage) {
+    private static void clear(ServerLevel level,CopperGolem g,WorkerState s,ChestStorage storage,DrainTeam team) {
         DrainState d=s.drain;s.status="Clearing exterior kelp and seagrass: "+d.index+"/"+d.columns();
-        for(int budget=0;budget<128 && d.index<d.columns();budget++) {
-            if(d.y<=d.floors[d.index]){d.index++;d.y=d.surfaceY;continue;}
+        for(int budget=0;budget<128;budget++) {
+            if(d.y<=d.floors[d.index]){team.complete(g,d,DrainState.Stage.SURFACE);return;}
             BlockPos p=d.column(d.index,d.y);BlockState b=level.getBlockState(p);
             if(!plant(b)){d.y--;continue;}
             if(!arrive(level,g,s,p))return;
@@ -222,38 +230,36 @@ public final class DrainJobs {
             var plan=storage.plan();
             if(!plan.add(drops)){WorkerBrain.wait(g,s,"Chest needs room for kelp or seagrass");return;}
             if(!plan.unchanged())return;
-            // Top-down clearing prevents uprooting a whole kelp plant into loose item entities.
             if(!level.setBlock(p,Blocks.WATER.defaultBlockState(),Block.UPDATE_CLIENTS))return;
             if(!plan.commit())s.pending.addAll(drops);
             g.swing(InteractionHand.MAIN_HAND, net.minecraft.world.item.component.SwingAnimation.DEFAULT);d.y--;return;
         }
-        if(d.index==d.columns())d.next(DrainState.Stage.SURFACE);
     }
 
-    private static void fill(ServerLevel level,CopperGolem g,WorkerState s) {
+    private static void fill(ServerLevel level,CopperGolem g,WorkerState s,DrainTeam team) {
         DrainState d=s.drain;s.status="Stacking temporary sand: "+d.index+"/"+d.columns();
-        for(int skip=0;skip<32 && d.index<d.columns();skip++) {
-            if(d.wall(d.column(d.index,d.surfaceY)) || d.floors[d.index]>=d.surfaceY){d.index++;continue;}
-            BlockPos top=d.column(d.index,d.surfaceY);
-            if(!arrive(level,g,s,top.above()))return;
-            int next=d.sandTops[d.index]==Integer.MIN_VALUE?d.floors[d.index]+1:d.sandTops[d.index]+1;
-            for(int n=0;n<8 && next<=d.surfaceY;n++,next++) {
-                BlockPos p=d.column(d.index,next);BlockState b=level.getBlockState(p);
-                boolean scaffold=d.scaffolds.contains(p)&&b.is(Blocks.GLASS);
-                if(!(b.isAir()||b.is(Blocks.WATER)||b.is(Blocks.BUBBLE_COLUMN)||scaffold)) {
-                    WorkerBrain.wait(g,s,"New obstruction in sand column; leaving existing blocks untouched");return;
-                }
-                if(net.minecraft.world.level.block.FallingBlock.isFree(level.getBlockState(p.below()))) {
-                    WorkerBrain.wait(g,s,"Sand column needs a stable base; existing blocks left untouched");return;
-                }
-                if(!level.setBlock(p,Blocks.SAND.defaultBlockState(),Block.UPDATE_ALL))return;
-                d.scaffolds.remove(p);d.sandTops[d.index]=next;
-            }
-            g.swing(InteractionHand.MAIN_HAND, net.minecraft.world.item.component.SwingAnimation.DEFAULT);
-            if(next>d.surfaceY)d.index++;
-            return;
+        if(d.wall(d.column(d.index,d.surfaceY)) || d.floors[d.index]>=d.surfaceY) {
+            team.complete(g,d,DrainState.Stage.WALLS);return;
         }
-        if(d.index==d.columns()){d.next(DrainState.Stage.WALLS);d.y=d.bottomY;}
+        BlockPos top=d.column(d.index,d.surfaceY);
+        if(!arrive(level,g,s,top.above()))return;
+        int next=d.sandTops[d.index]==Integer.MIN_VALUE?d.floors[d.index]+1:d.sandTops[d.index]+1;
+        for(int n=0;n<8 && next<=d.surfaceY;n++,next++) {
+            BlockPos p=d.column(d.index,next);BlockState b=level.getBlockState(p);
+            // Legacy surface footholds were not always saved with ownership. At the ocean
+            // waterline, glass above the surveyed floor can be reclaimed as access glass.
+            boolean scaffold=b.is(Blocks.GLASS)&&(d.scaffolds.contains(p)||next==d.surfaceY);
+            if(!(b.isAir()||b.is(Blocks.WATER)||b.is(Blocks.BUBBLE_COLUMN)||scaffold)) {
+                WorkerBrain.wait(g,s,"New obstruction in sand column at "+p.toShortString());return;
+            }
+            if(net.minecraft.world.level.block.FallingBlock.isFree(level.getBlockState(p.below()))) {
+                WorkerBrain.wait(g,s,"Sand column needs a stable base; existing blocks left untouched");return;
+            }
+            if(!level.setBlock(p,Blocks.SAND.defaultBlockState(),Block.UPDATE_ALL))return;
+            d.scaffolds.remove(p);d.sandTops[d.index]=next;
+        }
+        g.swing(InteractionHand.MAIN_HAND, net.minecraft.world.item.component.SwingAnimation.DEFAULT);
+        if(next>d.surfaceY)team.complete(g,d,DrainState.Stage.WALLS);
     }
 
     private static boolean sealed(ServerLevel level,BlockPos p) {
@@ -267,14 +273,14 @@ public final class DrainJobs {
     }
 
     /** Wall bottoms share the lowest surveyed floor, closing terrain dips at the perimeter. */
-    private static void walls(ServerLevel level,CopperGolem g,WorkerState s,boolean verify) {
+    private static void walls(ServerLevel level,CopperGolem g,WorkerState s,boolean verify,DrainTeam team) {
         DrainState d=s.drain;s.status=verify?"Checking the glass barrier":"Building exterior glass walls";
         for(int budget=0;budget<128 && d.index<d.columns();budget++) {
             BlockPos p=d.column(d.index,d.y);
-            if(!d.wall(p)){d.index++;d.y=d.bottomY;continue;}
-            if(d.y>d.surfaceY){d.index++;d.y=d.bottomY;continue;}
+            if(!d.wall(p)){team.complete(g,d,verify?DrainState.Stage.REMOVE:DrainState.Stage.VERIFY);return;}
+            if(d.y>d.surfaceY){team.complete(g,d,verify?DrainState.Stage.REMOVE:DrainState.Stage.VERIFY);return;}
             if(sealed(level,p)){d.scaffolds.remove(p);d.y++;continue;}
-            if(verify){d.stage=DrainState.Stage.WALLS;return;}
+            if(verify){team.advance(DrainState.Stage.WALLS);return;}
             BlockState b=level.getBlockState(p);
             if(!open(b)||plant(b)){WorkerBrain.wait(g,s,"Wall site obstructed; existing blocks left untouched");return;}
             BlockPos stand=null;
@@ -295,17 +301,13 @@ public final class DrainJobs {
             if(!level.setBlock(p,Blocks.GLASS.defaultBlockState(),Block.UPDATE_ALL))return;
             d.scaffolds.remove(p);d.y++;g.swing(InteractionHand.MAIN_HAND, net.minecraft.world.item.component.SwingAnimation.DEFAULT);return;
         }
-        if(d.index==d.columns()) {
-            if(verify)d.next(DrainState.Stage.REMOVE);
-            else{d.next(DrainState.Stage.VERIFY);d.y=d.bottomY;}
-        }
     }
 
-    private static void remove(ServerLevel level,CopperGolem g,WorkerState s) {
+    private static void remove(ServerLevel level,CopperGolem g,WorkerState s,DrainTeam team) {
         DrainState d=s.drain;s.status="Removing temporary sand: "+d.index+"/"+d.columns();
         for(int budget=0;budget<128 && d.index<d.columns();budget++) {
             int top=d.sandTops[d.index];
-            if(top==Integer.MIN_VALUE || top<=d.floors[d.index]){d.index++;continue;}
+            if(top==Integer.MIN_VALUE || top<=d.floors[d.index]){team.complete(g,d,DrainState.Stage.RETURN);return;}
             BlockPos p=d.column(d.index,top);
             // Clear from above; the worker descends only through its own now-cleared sand column.
             if(!arrive(level,g,s,p.above()))return;
@@ -316,10 +318,9 @@ public final class DrainJobs {
             // An unrelated replacement block is never removed, even inside the sand ledger.
             d.sandTops[d.index]--;return;
         }
-        if(d.index==d.columns())d.next(DrainState.Stage.RETURN);
     }
 
-    private static void cleanup(ServerLevel level,CopperGolem g,WorkerState s) {
+    private static void cleanup(ServerLevel level,CopperGolem g,WorkerState s,DrainTeam team) {
         DrainState d=s.drain;s.status="Removing temporary surface footholds";
         var it=d.scaffolds.iterator();
         for(int n=0;n<32&&it.hasNext();n++) {
@@ -328,6 +329,6 @@ public final class DrainJobs {
             if(level.getBlockState(p).is(Blocks.GLASS))level.setBlock(p,Blocks.AIR.defaultBlockState(),Block.UPDATE_ALL);
             it.remove();
         }
-        if(d.scaffolds.isEmpty()){d.next(DrainState.Stage.DONE);stop(g,s);s.status="Monument exterior drained; project complete";}
+        if(d.scaffolds.isEmpty()){team.advance(DrainState.Stage.DONE);stop(g,s);s.status="Monument exterior drained; project complete";}
     }
 }

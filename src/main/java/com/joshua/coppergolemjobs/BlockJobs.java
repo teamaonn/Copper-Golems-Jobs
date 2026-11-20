@@ -119,6 +119,7 @@ public final class BlockJobs {
         // The miner is now above the replacement floor. Reclaim the retired one without loot.
         worker.quarryFloor.removeIf(pos -> {
             if (pos.getY() <= y - 1 || !WorkerBrain.loaded(level, pos)) return false;
+            if (!level.getEntitiesOfClass(CopperGolem.class,new net.minecraft.world.phys.AABB(pos.above()),g -> g.isAlive()).isEmpty()) return false;
             return !level.getBlockState(pos).is(Blocks.COBBLESTONE) || worker.structuralBlocks.contains(pos)
                     || level.setBlock(pos, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
         });

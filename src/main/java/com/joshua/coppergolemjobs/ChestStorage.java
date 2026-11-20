@@ -22,16 +22,17 @@ public final class ChestStorage {
     private ChestStorage(List<Container> containers) { this.containers = containers; }
 
     public static ChestStorage nearby(ServerLevel level, Entity worker) {
+        int range=worker instanceof WorkerAccess access ? access.copperJobs$state().job.chestRange() : RANGE;
         BlockPos center = worker.blockPosition();
         List<BlockEntity> found = new ArrayList<>();
-        for (int cx = (center.getX() - RANGE) >> 4; cx <= (center.getX() + RANGE) >> 4; cx++) {
-            for (int cz = (center.getZ() - RANGE) >> 4; cz <= (center.getZ() + RANGE) >> 4; cz++) {
+        for (int cx = (center.getX() - range) >> 4; cx <= (center.getX() + range) >> 4; cx++) {
+            for (int cz = (center.getZ() - range) >> 4; cz <= (center.getZ() + range) >> 4; cz++) {
                 LevelChunk chunk = level.getChunkSource().getChunkNow(cx, cz);
                 if (chunk == null) continue;
                 for (BlockEntity be : chunk.getBlockEntities().values()) {
                     if (!(be instanceof Container) || be.isRemoved()) continue;
                     BlockPos pos = be.getBlockPos();
-                    if (worker.distanceToSqr(pos.getX() + .5, pos.getY() + .5, pos.getZ() + .5) > RANGE * RANGE) continue;
+                    if (worker.distanceToSqr(pos.getX() + .5, pos.getY() + .5, pos.getZ() + .5) > range * range) continue;
                     String id = BuiltInRegistries.BLOCK.getKey(be.getBlockState().getBlock()).getPath();
                     if (!id.equals("copper_chest") && !id.endsWith("_copper_chest")) continue;
                     if (level.getBlockState(pos.above()).isRedstoneConductor(level, pos.above())) continue;

@@ -93,7 +93,7 @@ public final class CopperGolemJobsMod implements ModInitializer {
             golem.setCanPickUpLoot(false);
             golem.setItemSlot(EquipmentSlot.MAINHAND, job == Job.IDLE ? ItemStack.EMPTY : stack.copyWithCount(1));
             golem.setDropChance(EquipmentSlot.MAINHAND, 0.0F);
-            player.sendSystemMessage(Component.literal(job == Job.IDLE ? "Copper Golem: idle." : "Copper Golem: " + job.label + ". Copper Chest range: 64 blocks."));
+            player.sendSystemMessage(Component.literal(job == Job.IDLE ? "Copper Golem: idle." : "Copper Golem: " + job.label + ". Copper Chest range: " +job.chestRange()+" blocks."));
             return InteractionResult.SUCCESS;
         });
     }

@@ -38,7 +38,7 @@ public final class WorkerGameTests {
     }
     private static void step(ServerLevel level, CopperGolem g, WorkerState s) { g.tickCount = 10; s.cooldown = 0; WorkerBrain.tick(level, g, s); }
 
-    @GameTest(maxTicks = 300, skyAccess = true, padding = 32)
+    @GameTest(maxTicks = 300, skyAccess = true, padding = 96)
     public void jobsAndGates(GameTestHelper helper) {
         ServerLevel level = helper.getLevel();
         BlockPos base = helper.absolutePos(new BlockPos(2, 1, 2));
@@ -91,7 +91,7 @@ public final class WorkerGameTests {
         step(level,g,s);
         BlockPos quarryStep=new BlockPos(quarryX+1,base.getY()-1,quarryZ);
         g.setPos(Vec3.atBottomCenterOf(quarryStep));step(level,g,s);
-        check(s.cursor.getY()==base.getY()-1&&level.getBlockState(quarryStep.below()).is(Blocks.COBBLESTONE),"quarry builds its own descending cobblestone staircase");
+        check(s.cursor.getY()==base.getY()-1&&level.getBlockState(quarryStep.below()).is(Blocks.COBBLESTONE),"quarry builds its own descending cobblestone staircase: "+s.status+" cursor="+s.cursor+" expected="+quarryStep+" floor="+level.getBlockState(quarryStep.below()));
         ore=quarryStep.east(); level.setBlock(ore,Blocks.DIAMOND_ORE.defaultBlockState(),3);
         BlockPos fluid=ore.east(); level.setBlock(fluid,Blocks.WATER.defaultBlockState(),3);
         step(level,g,s);
@@ -196,7 +196,7 @@ public final class WorkerGameTests {
         });
     }
 
-    @GameTest(maxTicks = 400, skyAccess = true, padding = 32)
+    @GameTest(maxTicks = 400, skyAccess = true, padding = 96)
     public void quarryRecoversFromLowerLedge(GameTestHelper helper) {
         ServerLevel level = helper.getLevel();
         BlockPos anchor = helper.absolutePos(new BlockPos(0, 8, 0));
@@ -229,7 +229,7 @@ public final class WorkerGameTests {
         level.addFreshEntity(golem);
         helper.runAfterDelay(300, () -> {
             check(worker.cursor.equals(step) && level.getBlockState(ore).isAir() && count(chest, Items.DIAMOND_ORE) == 1,
-                    "live miner climbs back from a lower ledge, crosses a gap and resumes quarrying (" + worker.status + ")");
+                    "live miner climbs back from a lower ledge, crosses a gap and resumes quarrying (" + worker.status + ", cursor="+worker.cursor+", expected="+step+", drops="+count(chest,Items.DIAMOND_ORE)+")");
             check(worker.structuralBlocks.size() > 1 && level.getBlockState(ledge.below()).is(grate),
                     "quarry approach uses its own cobblestone and preserves the ledge");
             check(level.getBlockState(chestPos.above()).isAir() && ChestStorage.nearby(level, golem).exists(),
@@ -359,6 +359,120 @@ public final class WorkerGameTests {
             golem.discard();
             helper.succeed();
         });
+    }
+
+    @GameTest(maxTicks = 150, skyAccess = true, padding = 80)
+    public void workerProtectionAndSharedQuarry(GameTestHelper helper) {
+        ServerLevel level=helper.getLevel();
+        BlockPos anchor=helper.absolutePos(new BlockPos(3,5,3));
+        BlockPos base=new BlockPos(((anchor.getX()>>4)<<4)+5,anchor.getY(),((anchor.getZ()>>4)<<4)+5);
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-3,-2,-3),base.offset(9,4,9)))
+            level.setBlock(p,p.getY()<base.getY()?Blocks.STONE.defaultBlockState():Blocks.AIR.defaultBlockState(),2);
+        CopperGolem first=EntityTypes.COPPER_GOLEM.create(level,net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+        first.setPos(Vec3.atBottomCenterOf(base));first.setNoAi(true);level.addFreshEntity(first);
+        WorkerState a=((WorkerAccess)first).copperJobs$state();
+        for(Job job:Job.values()) {
+            a.assign(job,base,Direction.EAST);first.setInvulnerableTime(0);
+            float health=first.getHealth();
+            boolean hurt=first.hurtServer(level,level.damageSources().generic(),job==Job.SWORD?2:1);
+            if(job!=Job.IDLE && job!=Job.SWORD) check(!hurt&&first.getHealth()==health,job+" worker ignores incoming damage");
+            else {
+                check(hurt&&first.getHealth()<health,job+" keeps normal damage behavior");
+                first.setHealth(first.getMaxHealth());
+            }
+        }
+        a.assign(Job.PICKAXE,base,Direction.EAST);
+        for(var source:List.of(level.damageSources().fall(),level.damageSources().inFire(),level.damageSources().drown())) {
+            first.setInvulnerableTime(0);float health=first.getHealth();
+            check(!first.hurtServer(level,source,100)&&first.getHealth()==health,"worker survives environmental damage");
+        }
+        CopperGolem second=EntityTypes.COPPER_GOLEM.create(level,net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+        second.setPos(Vec3.atBottomCenterOf(base.south()));second.setNoAi(true);level.addFreshEntity(second);
+        WorkerState b=((WorkerAccess)second).copperJobs$state();b.assign(Job.PICKAXE,base.south(),Direction.EAST);
+        a.structuralBlocks.add(base.east(3));b.fluidPlugs.add(base.east(4));
+        WorkerProjects.quarry(level,first,a);
+        check(a.origin.equals(b.origin)&&a.structuralBlocks==b.structuralBlocks&&a.fluidPlugs==b.fluidPlugs,
+                "quarry helpers share their origin and construction ownership");
+        BlockPos target=base.east(5);level.setBlock(target,Blocks.DIAMOND_ORE.defaultBlockState(),3);
+        a.target=target;WorkerProjects.reserve(level,first,target);
+        check(!WorkerProjects.available(level,second,target),"another worker cannot claim an active block target");
+        a.clearTarget();check(WorkerProjects.available(level,second,target),"abandoned target is available immediately");
+        b.assign(Job.IDLE,base,Direction.EAST);
+        check(a.structuralBlocks.contains(base.east(3)),"reassigning a helper preserves the remaining crew's construction records");
+        BlockPos remoteChest=base.offset(-1,0,-1);
+        level.setBlock(remoteChest,BuiltInRegistries.BLOCK.getValue(Identifier.withDefaultNamespace("copper_chest")).defaultBlockState(),3);
+        first.setPos(remoteChest.getX()+.5+150,remoteChest.getY()+.5,remoteChest.getZ()+.5);
+        a.assign(Job.DRAIN,base,Direction.EAST);
+        check(ChestStorage.nearby(level,first).exists(),"drain crew detects a Copper Chest exactly 150 blocks away");
+        first.setPos(first.getX()+.01,first.getY(),first.getZ());
+        check(!ChestStorage.nearby(level,first).exists(),"drain crew rejects storage beyond 150 blocks");
+        first.setPos(remoteChest.getX()+.5+100,remoteChest.getY()+.5,remoteChest.getZ()+.5);
+        a.assign(Job.PICKAXE,base,Direction.EAST);
+        check(!ChestStorage.nearby(level,first).exists(),"ordinary workers retain their 64-block Copper Chest range");
+        first.discard();second.discard();helper.succeed();
+    }
+
+    @GameTest(maxTicks = 500, skyAccess = true, padding = 80)
+    public void cooperativeDrainAndLegacyGlass(GameTestHelper helper) {
+        ServerLevel level=helper.getLevel();BlockPos base=helper.absolutePos(new BlockPos(0,8,0));
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-6,-5,-6),base.offset(6,3,6)))
+            level.setBlock(p,p.getY()==base.getY()-4?Blocks.STONE.defaultBlockState():
+                p.getY()<=base.getY()?Blocks.WATER.defaultBlockState():Blocks.AIR.defaultBlockState(),2);
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-5,-4,-5),base.offset(5,0,5)))
+            if(Math.abs(p.getX()-base.getX())==5||Math.abs(p.getZ()-base.getZ())==5)
+                level.setBlock(p,Blocks.GLASS.defaultBlockState(),2);
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-1,-3,-1),base.offset(1,-2,1)))
+            if(p.getY()==base.getY()-2||p.getX()!=base.getX()||p.getZ()!=base.getZ())
+                level.setBlock(p,Blocks.PRISMARINE.defaultBlockState(),2);
+        BlockPos room=base.below(3),roof=base.below(2);
+        BlockPos chestPos=base.offset(0,1,-4);
+        level.setBlock(chestPos,BuiltInRegistries.BLOCK.getValue(Identifier.withDefaultNamespace("copper_chest")).defaultBlockState(),3);
+        Container chest=(Container)level.getBlockEntity(chestPos);
+        var box=new net.minecraft.world.level.levelgen.structure.BoundingBox(base.getX()-1,base.getY()-4,base.getZ()-1,base.getX()+1,base.getY()-2,base.getZ()+1);
+        CopperGolem[] workers=new CopperGolem[2];WorkerState[] states=new WorkerState[2];
+        for(int i=0;i<2;i++) {
+            BlockPos home=base.offset(i*2-1,1,0);level.setBlock(home.below(),Blocks.COBBLESTONE.defaultBlockState(),3);
+            workers[i]=EntityTypes.COPPER_GOLEM.create(level,net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+            workers[i].setPos(Vec3.atBottomCenterOf(home));workers[i].setNoAi(true);level.addFreshEntity(workers[i]);
+            states[i]=((WorkerAccess)workers[i]).copperJobs$state();states[i].assign(Job.DRAIN,home,Direction.NORTH);
+            states[i].drain.begin(box,base.getY());
+        }
+        boolean glassAdded=false,reloaded=false,parallel=false,barrier=false;
+        for(int n=0;n<20000&&states[0].drain.stage!=DrainState.Stage.DONE;n++) {
+            for(int i=0;i<2;i++) {
+                WorkerState s=states[i];CopperGolem g=workers[i];
+                if(s.drain.travel!=null)g.setPos(Vec3.atBottomCenterOf(s.drain.travel));
+                if(s.drain.stage==DrainState.Stage.FILL&&!glassAdded) {
+                    for(int c=0;c<s.drain.columns();c++) {
+                        BlockPos top=s.drain.column(c,s.drain.surfaceY);
+                        if(!s.drain.wall(top)&&s.drain.floors[c]<s.drain.surfaceY&&level.getBlockState(top).is(Blocks.WATER))
+                            level.setBlock(top,Blocks.GLASS.defaultBlockState(),3);
+                    }
+                    glassAdded=true;
+                }
+                DrainJobs.work(level,g,s,ChestStorage.nearby(level,g));
+                if(states[0].drain.stage==DrainState.Stage.CLEAR&&states[1].drain.stage==DrainState.Stage.CLEAR
+                        &&states[0].drain.index!=states[1].drain.index)parallel=true;
+                if(s.drain.stage==DrainState.Stage.WALLS) {
+                    for(int c=0;c<s.drain.columns();c++) {
+                        if(!s.drain.wall(s.drain.column(c,s.drain.surfaceY))&&s.drain.floors[c]<s.drain.surfaceY)
+                            checkQuiet(s.drain.sandTops[c]==s.drain.surfaceY,"all columns must be filled before either worker starts walls");
+                    }
+                    barrier=true;
+                }
+                if(s.drain.stage==DrainState.Stage.FILL&&!reloaded&&java.util.Arrays.stream(s.drain.sandTops).anyMatch(v->v!=Integer.MIN_VALUE)) {
+                    var out=TagValueOutput.createWithContext(ProblemReporter.DISCARDING,level.registryAccess());s.save(out);
+                    s.load(TagValueInput.create(ProblemReporter.DISCARDING,level.registryAccess(),out.buildResult()));reloaded=true;
+                }
+            }
+            if(n==19999)throw new IllegalStateException("Cooperative drain stalled: "+states[0].status+" / "+states[1].status);
+        }
+        check(parallel&&barrier&&glassAdded&&reloaded,"two drain workers split columns, replace legacy glass and resume a shared project after reload");
+        check(states[0].drain.stage==DrainState.Stage.DONE&&states[1].drain.stage==DrainState.Stage.DONE,
+                "crew completes together after all sand and scaffolds are cleared");
+        check(level.getBlockState(roof).is(Blocks.PRISMARINE)&&level.getBlockState(room).is(Blocks.WATER)&&count(chest,Items.SAND)==0,
+                "cooperative drain preserves monument rooms and creates no sand payout");
+        for(CopperGolem golem:workers)golem.discard();helper.succeed();
     }
 
     @GameTest(maxTicks = 400, skyAccess = true)
@@ -508,6 +622,14 @@ public final class WorkerGameTests {
         WorkerState s=((WorkerAccess)g).copperJobs$state();s.assign(Job.DRAIN,base.above(),Direction.NORTH);
         s.drain.begin(new net.minecraft.world.level.levelgen.structure.BoundingBox(base.getX()-1,base.getY()-4,base.getZ()-1,
             base.getX()+1,base.getY()-2,base.getZ()+1),base.getY());
+        BlockPos partnerHome=base.west(2).above();
+        level.setBlock(partnerHome.below(),Blocks.COBBLESTONE.defaultBlockState(),3);
+        CopperGolem partner=EntityTypes.COPPER_GOLEM.create(level,net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+        partner.setPos(Vec3.atBottomCenterOf(partnerHome));level.addFreshEntity(partner);
+        WorkerState partnerState=((WorkerAccess)partner).copperJobs$state();
+        partnerState.assign(Job.DRAIN,partnerHome,Direction.NORTH);
+        partnerState.drain.begin(new net.minecraft.world.level.levelgen.structure.BoundingBox(base.getX()-1,base.getY()-4,base.getZ()-1,
+            base.getX()+1,base.getY()-2,base.getZ()+1),base.getY());
         helper.onEachTick(()->{
             if(helper.getTick()%1000==0)System.out.println("LIVE DRAIN "+helper.getTick()+" "+s.drain.stage+" "+s.drain.index+" "+s.drain.y+" "+s.status+" "+g.position()+" target="+s.drain.travel+" phase="+s.drain.routePhase+" route="+s.drain.route+" lid="+(s.drain.travel==null?"none":level.getBlockState(new BlockPos(s.drain.travel.getX(),s.drain.surfaceY,s.drain.travel.getZ()))) );
             checkQuiet(level.getBlockState(base.below(2)).is(Blocks.PRISMARINE),"live drain must preserve roof");
@@ -515,7 +637,9 @@ public final class WorkerGameTests {
                 check(g.position().distanceToSqr(Vec3.atBottomCenterOf(base.above()))<.5,"live drain walks, swims, finishes and returns home without test teleports");
                 check(level.getBlockState(base.below(3)).is(Blocks.WATER),"live drain keeps sealed interior water intact through fluid ticks");
                 check(count((Container)level.getBlockEntity(chestPos),Items.SAND)==0,"live drain creates no sand payout");
-                g.discard();helper.succeed();
+                check(partnerState.drain.stage==DrainState.Stage.DONE&&partner.position().distanceToSqr(Vec3.atBottomCenterOf(partnerHome))<.5,
+                        "second live drain worker completes the shared project and returns home without test teleports");
+                g.discard();partner.discard();helper.succeed();
             }
         });
     }

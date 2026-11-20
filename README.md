@@ -1,12 +1,12 @@
-# Copper Golem Jobs — Fabric 26.3 — 0.3.5 test build
+# Copper Golem Jobs — Fabric 26.3 — 0.4.0 test build
 
 Give a vanilla Copper Golem a job by right-clicking it with a vanilla tool. No fuel, power source, hearts, upgrades, or tool durability costs.
 
-[Download the 0.3.5 test jar](dist/copper-golem-jobs-fabric-26.3-0.3.5.jar).
+[Download the 0.4.0 test jar](dist/copper-golem-jobs-fabric-26.3-0.4.0.jar).
 
 ## Install
 
-Use Minecraft Java **26.3**, Fabric Loader **0.19.5 or newer**, and Fabric API **0.160.6+26.3**. Put `copper-golem-jobs-fabric-26.3-0.3.5.jar` into `mods` alongside Fabric API. Remove the earlier `copper-golems` test mod before installing this restart; the two mods deliberately cannot load together.
+Use Minecraft Java **26.3**, Fabric Loader **0.19.5 or newer**, and Fabric API **0.160.6+26.3**. Put `copper-golem-jobs-fabric-26.3-0.4.0.jar` into `mods` alongside Fabric API. Remove the earlier `copper-golems` test mod before installing this restart; the two mods deliberately cannot load together.
 
 The mod uses vanilla mobs, items, blocks, and visuals. The jar works in single-player and on a Fabric server. Begin in a separate Creative test world because several jobs excavate terrain automatically.
 
@@ -18,6 +18,16 @@ The mod uses vanilla mobs, items, blocks, and visuals. The jar works in single-p
 - Sneak-right-click with an axe for normal vanilla scraping. Honeycomb still waxes it normally. Vanilla oxidation remains active; wax workers you want to keep working indefinitely.
 - If an unassigned golem is already carrying a real item, retrieve that item with an empty hand before assigning a job.
 - Reassigning a job resets its work chunk and uses the golem's current facing for mining. Changing jobs does not create another physical tool.
+
+## Worker protection and shared projects
+
+Assigned workers are immune to incoming damage while doing any job except sword combat. Idle golems and sword fighters use vanilla damage behavior. Workers do not shove one another off their work platforms.
+
+Quarry miners assigned to the same chunk share the current layer and ownership of construction blocks. Block workers reserve active targets so helpers can select other work. A helper can be reassigned without erasing the remaining crew's construction records.
+
+Drain workers above the same monument at the same surface height share a saved project. They reserve separate columns and wait for the whole crew to finish a construction stage before advancing. All active crew members return to their own starting platforms before temporary access glass is removed. Paused or unloaded workers release their columns after five seconds, allowing the crew to continue. Resume an existing project by giving its worker the Loyalty III trident again.
+
+The sand stage recognizes the crew's shared access glass. For older saves, untracked glass at the surface of a previously surveyed open sand column is reclaimed as temporary access glass. Glass below that level and unrelated obstructions still pause filling.
 
 ## Generator setup
 
@@ -47,7 +57,7 @@ Modded mega trees are supported when their blocks use Minecraft's standard `logs
 
 ## Monument drain setup
 
-Place the golem on a solid platform **at ocean water level, directly above a naturally generated Ocean Monument**, and assign a **Loyalty III trident**. Its feet should be one block above the top water block. Keep open Copper Chests within 64 blocks of its working positions; a chest near the center is preferable. Stay within simulation distance so the golem keeps ticking, keep the monument footprint loaded, and wax the golem for a long project.
+Place the golem on a solid platform **at ocean water level, directly above a naturally generated Ocean Monument**, and assign a **Loyalty III trident**. Its feet should be one block above the top water block. Keep open Copper Chests within 150 blocks of its working positions; a chest near the center is preferable. Stay within simulation distance so the golem keeps ticking, keep the monument footprint loaded, and wax the golem for a long project.
 
 The worker surveys the monument's recorded structure bounds, leaves one column of clearance around its footprint, and builds its outer glass wall a further block out. It clears exterior kelp/seagrass, returns to its starting platform, fills the exterior columns with supplied sand, constructs and verifies the perimeter barrier, removes its temporary sand without drops, and returns home. Temporary glass footholds are cleaned up; permanent walls remain. Sand columns are assembled stably from the bottom while the golem works at the surface, avoiding large groups of falling-sand entities.
 
@@ -63,7 +73,7 @@ Looting applies through the victim's normal death loot table; it does not multip
 
 ## Copper Chest rule
 
-Every action requires an available, loaded Copper Chest within **64 blocks in three dimensions**, measured from the golem to the chest's center. This is a radius, independent of chunk adjacency. The 64-block distance is inclusive. A mining golem needs storage along its route; one surface chest cannot support mining indefinitely below it.
+Every action requires an available, loaded Copper Chest within **64 blocks in three dimensions**, or **150 blocks for the monument drain crew**, measured from the golem to the chest's center. This is a radius, independent of chunk adjacency. The 64-block distance is inclusive. A mining golem needs storage along its route; one surface chest cannot support mining indefinitely below it.
 
 All oxidized and waxed Copper Chest variants count. Regular chests and barrels do not. Chests with a solid block directly over the lid are unavailable. Nearest chests are used first, and output can span multiple valid chests, including both halves of a double chest.
 
@@ -110,7 +120,7 @@ C:\Gradle\bin\gradle.bat build
 
 Use **JDK 25** and **Gradle 9.5.1 or newer compatible with Loom 1.17**. The project pins **Loom 1.17.20**, uses the unobfuscated Minecraft 26.3 names, and does not use Yarn mappings. Gradle downloads the dependencies on the first build.
 
-The installable output is `build/libs/copper-golem-jobs-fabric-26.3-0.3.5.jar`. The `-sources.jar` is source code for developers, not the mod to install.
+The installable output is `build/libs/copper-golem-jobs-fabric-26.3-0.4.0.jar`. The `-sources.jar` is source code for developers, not the mod to install.
 
 Optional headless game tests:
 

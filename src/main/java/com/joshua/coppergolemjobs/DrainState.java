@@ -15,7 +15,9 @@ public final class DrainState {
     public int minX, maxX, minZ, maxZ, surfaceY, bottomY, index, y;
     public int[] floors = new int[0];
     public int[] sandTops = new int[0];
-    public final Set<BlockPos> scaffolds = new LinkedHashSet<>();
+    public Set<BlockPos> scaffolds = new LinkedHashSet<>();
+    public java.util.BitSet completed = new java.util.BitSet();
+    public int[] heights = new int[0];
     public transient BlockPos travel;
     public transient int routePhase, stuck;
     public transient net.minecraft.world.phys.Vec3 checkpoint;
@@ -38,22 +40,31 @@ public final class DrainState {
         minZ = monument.minZ() - 2; maxZ = monument.maxZ() + 2;
         surfaceY = surface; bottomY = surface; index = 0; y = surface;
         floors = new int[columns()]; sandTops = new int[columns()];
+        heights = new int[columns()]; java.util.Arrays.fill(heights, Integer.MIN_VALUE);
+        completed = new java.util.BitSet();
         java.util.Arrays.fill(floors, Integer.MIN_VALUE);
         java.util.Arrays.fill(sandTops, Integer.MIN_VALUE);
         stage = Stage.SURVEY;
     }
     public void reset() {
         stage = Stage.NEW; index = 0; y = 0;
-        floors = new int[0]; sandTops = new int[0]; scaffolds.clear();
+        floors = new int[0]; sandTops = new int[0]; scaffolds = new LinkedHashSet<>();
+        completed = new java.util.BitSet(); heights = new int[0];
         travel = null; routePhase = 0; stuck = 0; checkpoint = null; route.clear();
     }
-    public void next(Stage next) { stage = next; index = 0; y = surfaceY; travel = null; routePhase = 0; route.clear(); }
+    public void next(Stage next) {
+        stage = next; index = 0; y = surfaceY; travel = null; routePhase = 0; route.clear();
+        completed = new java.util.BitSet(); heights = new int[columns()];
+        java.util.Arrays.fill(heights, Integer.MIN_VALUE);
+    }
     public void save(ValueOutput out) {
         out.putString("DrainStage", stage.name());
         if (stage == Stage.NEW) return;
         out.putIntArray("DrainBounds", new int[]{minX,maxX,minZ,maxZ,surfaceY,bottomY,index,y});
         out.putIntArray("DrainFloors", floors);
         out.putIntArray("DrainSandTops", sandTops);
+        out.putIntArray("DrainCompleted", completed.stream().toArray());
+        out.putIntArray("DrainHeights", heights);
         out.store("DrainScaffolds", BlockPos.CODEC.listOf(), new ArrayList<>(scaffolds));
     }
     public void load(ValueInput in) {
@@ -67,6 +78,14 @@ public final class DrainState {
         floors=in.getIntArray("DrainFloors").orElse(new int[0]);
         sandTops=in.getIntArray("DrainSandTops").orElse(new int[0]);
         if (floors.length != columns() || sandTops.length != columns() || index < 0 || index > columns()) { reset(); return; }
+        heights=in.getIntArray("DrainHeights").orElse(new int[0]);
+        if(heights.length!=columns()) {
+            heights=new int[columns()]; java.util.Arrays.fill(heights,Integer.MIN_VALUE);
+            completed.set(0,index);
+            if(index<columns()) heights[index]=y;
+        } else for(int column:in.getIntArray("DrainCompleted").orElse(new int[0])) {
+            if(column>=0 && column<columns()) completed.set(column);
+        }
         scaffolds.addAll(in.read("DrainScaffolds", BlockPos.CODEC.listOf()).orElse(java.util.List.of()));
     }
 }

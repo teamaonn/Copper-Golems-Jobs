@@ -33,4 +33,6 @@ public enum Job {
     }
 
     public boolean trees() { return this == AXE || this == TREE_FARM || this == MEGA_AXE; }
+
+    public int chestRange() { return this == DRAIN ? 150 : ChestStorage.RANGE; }
 }

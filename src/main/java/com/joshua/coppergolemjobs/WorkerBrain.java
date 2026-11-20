@@ -25,8 +25,9 @@ public final class WorkerBrain {
         if (state.job == Job.DRAIN) DrainJobs.motion(level, golem, state);
         if (state.cooldown > 0) state.cooldown--;
         if (golem.tickCount % 10 != 0) return;
+        if(state.job==Job.PICKAXE) WorkerProjects.quarry(level,golem,state);
         ChestStorage storage = ChestStorage.nearby(level, golem);
-        if (!storage.exists()) { wait(golem, state, "No Copper Chest within 64 blocks"); return; }
+        if (!storage.exists()) { wait(golem, state, "No Copper Chest within "+state.job.chestRange()+" blocks"); return; }
         if (!state.pending.isEmpty()) {
             ChestStorage.Transaction plan = storage.plan();
             if (!plan.add(state.pending) || !plan.commit()) { wait(golem, state, "Chest needs room for collected drops"); return; }
@@ -237,7 +238,11 @@ public final class WorkerBrain {
 
     /** Scans the assigned work area and a reachable vertical band. */
     public static BlockPos findBlock(ServerLevel level, CopperGolem golem, WorkerState state, Predicate<BlockPos> valid) {
-        if (state.target != null && loaded(level, state.target) && valid.test(state.target)) return state.target;
+        if (state.target != null && loaded(level, state.target) && valid.test(state.target)
+                && WorkerProjects.available(level,golem,state.target)) {
+            WorkerProjects.reserve(level,golem,state.target);
+            return state.target;
+        }
         state.clearTarget();
         state.skipped.entrySet().removeIf(e -> e.getValue() <= level.getGameTime());
         List<BlockPos> candidates = new ArrayList<>();
@@ -252,15 +257,16 @@ public final class WorkerBrain {
         int lowY = state.job == Job.PICKAXE ? state.cursor.getY() : Math.max(level.getMinY(), golem.blockPosition().getY() - 6);
         int highY = state.job == Job.PICKAXE ? state.cursor.getY() : Math.min(level.getMaxY(), golem.blockPosition().getY() + 12);
         for (BlockPos p : BlockPos.betweenClosed(x0, lowY, z0, x1, highY, z1)) {
-            if (valid.test(p) && (!state.skipped.containsKey(p) || inReach(level, golem, p))) candidates.add(p.immutable());
+            if (valid.test(p) && WorkerProjects.available(level,golem,p)
+                    && (!state.skipped.containsKey(p) || inReach(level, golem, p))) candidates.add(p.immutable());
         }
         candidates.sort(Comparator.comparingDouble(p -> p.distSqr(golem.blockPosition())));
         int attempts = 0;
         for (BlockPos p : candidates) {
-            if (inReach(level, golem, p)) { state.target = p; return p; }
+            if (inReach(level, golem, p)) { state.target = p; WorkerProjects.reserve(level,golem,p); return p; }
             if (attempts++ >= 64) break;
             approach(level, golem, state, p, !state.job.trees());
-            if (state.approach != null) return p;
+            if (state.approach != null) { WorkerProjects.reserve(level,golem,p); return p; }
         }
         state.cooldown = 20;
         return null;

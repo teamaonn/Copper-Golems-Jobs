@@ -2,6 +2,8 @@ package com.joshua.coppergolemjobs;
 
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.animal.golem.CopperGolem;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 
 import java.lang.ref.WeakReference;
 import java.util.HashMap;
@@ -18,6 +20,7 @@ final class DrainTeam {
     private final Map<Integer, UUID> claims = new HashMap<>();
     private final java.util.Set<UUID> returned = new java.util.HashSet<>();
     private DrainState progress;
+    private int spongeColumn, spongeY = Integer.MAX_VALUE;
 
     static boolean joinExisting(ServerLevel level, CopperGolem golem, WorkerState worker) {
         CopperGolem sponsor = null;
@@ -166,22 +169,57 @@ final class DrainTeam {
                     break;
                 }
             }
+            boolean assisting = false;
             if (selected < 0) {
-                worker.status = "Waiting for the crew to finish this stage ("
-                        + d.stage.name().toLowerCase(java.util.Locale.ROOT) + ": "
-                        + d.completed.cardinality() + "/" + d.columns() + " columns; "
-                        + claims.size() + " assigned)";
-                return false;
+                // Keep helping the same column until it is finished. Shared heights and
+                // sand ledgers are read again before every action on the server thread.
+                if (d.index < d.columns() && !d.completed.get(d.index) && claims.containsKey(d.index)) {
+                    selected = d.index;
+                } else {
+                    int smallestCrew = Integer.MAX_VALUE;
+                    for (int c=0;c<d.columns();c++) {
+                        if (d.completed.get(c)) continue;
+                        int assigned = 0;
+                        for (Member member : members.values()) if (member.state().drain.index == c) assigned++;
+                        if (assigned < smallestCrew) { selected = c; smallestCrew = assigned; }
+                    }
+                }
+                assisting = true;
             }
-            claims.put(selected, id);
-            d.travel = null;
-            d.route.clear();
+            if (selected < 0) return false;
+            if (!assisting) claims.put(selected, id);
+            if (d.index != selected) { d.travel = null; d.route.clear(); }
         }
         d.index = selected;
         d.y = d.heights[selected] == Integer.MIN_VALUE
                 ? (d.stage == DrainState.Stage.WALLS || d.stage == DrainState.Stage.VERIFY ? d.bottomY : d.surfaceY)
                 : d.heights[selected];
         return true;
+    }
+
+    /** Budgeted shared exterior scan; solid roofs protect enclosed sponge rooms. */
+    void cleanSponges(ServerLevel level) {
+        DrainState d=progress;
+        int limit=Math.max(level.getMinY(),d.structureBottom==Integer.MIN_VALUE?d.surfaceY-96:d.structureBottom);
+        for(int budget=0;budget<512;budget++) {
+            if(spongeColumn>=d.columns()) { spongeColumn=0; spongeY=Integer.MAX_VALUE; return; }
+            if(spongeY==Integer.MAX_VALUE)spongeY=d.surfaceY+2;
+            if(spongeY<limit) { spongeColumn++; spongeY=Integer.MAX_VALUE; continue; }
+            var p=d.column(spongeColumn,spongeY);
+            if(!WorkerBrain.loaded(level,p)) { spongeColumn++; spongeY=Integer.MAX_VALUE; continue; }
+            var block=level.getBlockState(p);
+            boolean sponge=block.is(Blocks.SPONGE)
+                    ||block.is(Blocks.WET_SPONGE);
+            if(sponge)level.setBlock(p,Blocks.AIR.defaultBlockState(),
+                    Block.UPDATE_ALL);
+            boolean ownedSand=block.is(Blocks.SAND)
+                    &&d.sandTops[spongeColumn]!=Integer.MIN_VALUE
+                    &&spongeY>d.floors[spongeColumn]&&spongeY<=d.sandTops[spongeColumn];
+            boolean accessGlass=block.is(Blocks.GLASS)&&d.scaffolds.contains(p);
+            if(!sponge&&!ownedSand&&!accessGlass&&!block.getCollisionShape(level,p).isEmpty()) {
+                spongeColumn++; spongeY=Integer.MAX_VALUE;
+            } else spongeY--;
+        }
     }
 
     void checkpoint(DrainState d) {
@@ -193,7 +231,7 @@ final class DrainTeam {
     void complete(CopperGolem golem, DrainState d, DrainState.Stage next) {
         progress.bottomY = Math.min(progress.bottomY, d.bottomY);
         d.completed.set(d.index);
-        claims.remove(d.index, golem.getUUID());
+        claims.remove(d.index);
         if (d.completed.cardinality() == d.columns()) advance(next);
         else {
             d.index = d.columns();

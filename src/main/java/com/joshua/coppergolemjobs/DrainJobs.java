@@ -25,8 +25,11 @@ public final class DrainJobs {
     private static boolean plant(BlockState s) {
         return s.is(Blocks.KELP) || s.is(Blocks.KELP_PLANT) || s.is(Blocks.SEAGRASS) || s.is(Blocks.TALL_SEAGRASS);
     }
+    private static boolean sponge(BlockState s) {
+        return s.is(Blocks.SPONGE) || s.is(Blocks.WET_SPONGE);
+    }
     private static boolean open(BlockState s) {
-        return s.isAir() || s.is(Blocks.WATER) || s.is(Blocks.BUBBLE_COLUMN) || plant(s);
+        return s.isAir() || s.is(Blocks.WATER) || s.is(Blocks.BUBBLE_COLUMN) || plant(s) || sponge(s);
     }
     public static void stop(CopperGolem g, WorkerState s) {
         s.drain.travel = null;
@@ -144,7 +147,15 @@ public final class DrainJobs {
         return false;
     }
 
+    static void maintenance(ServerLevel level, CopperGolem g, WorkerState s) {
+        DrainState d=s.drain;
+        if(d.stage==DrainState.Stage.NEW || d.columns()<=0 || d.spongeMaintenanceTick==level.getGameTime())return;
+        d.spongeMaintenanceTick=level.getGameTime();
+        DrainTeam.join(level,g,s).cleanSponges(level);
+    }
+
     public static void work(ServerLevel level, CopperGolem g, WorkerState s, ChestStorage storage) {
+        maintenance(level,g,s);
         DrainState d=s.drain;
         if (d.stage == DrainState.Stage.NEW) { discover(level,g,s); return; }
         DrainTeam team=DrainTeam.join(level,g,s);
@@ -282,7 +293,7 @@ public final class DrainJobs {
 
     private static boolean sealed(ServerLevel level,BlockPos p) {
         BlockState b=level.getBlockState(p);
-        return b.is(Blocks.GLASS) || (!b.hasBlockEntity() && b.isCollisionShapeFullBlock(level,p) && b.getFluidState().isEmpty());
+        return b.is(Blocks.GLASS) || (!sponge(b) && !b.hasBlockEntity() && b.isCollisionShapeFullBlock(level,p) && b.getFluidState().isEmpty());
     }
     /** Wall bottoms share the lowest surveyed floor, closing terrain dips at the perimeter. */
     private static void walls(ServerLevel level,CopperGolem g,WorkerState s,boolean verify,DrainTeam team) {
@@ -312,7 +323,7 @@ public final class DrainJobs {
             BlockPos p=d.column(d.index,top);
             // Clear from above; the worker descends only through its own now-cleared sand column.
             if(!arrive(level,g,s,p.above()))return;
-            if(level.getBlockState(p).is(Blocks.SAND)) {
+            if(level.getBlockState(p).is(Blocks.SAND) || sponge(level.getBlockState(p))) {
                 if(!level.setBlock(p,Blocks.AIR.defaultBlockState(),Block.UPDATE_ALL))return;
                 g.swing(InteractionHand.MAIN_HAND, net.minecraft.world.item.component.SwingAnimation.DEFAULT);
             }

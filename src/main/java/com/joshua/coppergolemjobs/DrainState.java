@@ -19,6 +19,7 @@ public final class DrainState {
     public Set<BlockPos> scaffolds = new LinkedHashSet<>();
     public java.util.BitSet completed = new java.util.BitSet();
     public int[] heights = new int[0];
+    public transient long spongeMaintenanceTick = Long.MIN_VALUE;
     public transient BlockPos travel;
     public transient int routePhase, stuck;
     public transient net.minecraft.world.phys.Vec3 checkpoint;
@@ -49,7 +50,7 @@ public final class DrainState {
         stage = Stage.SURVEY;
     }
     public void reset() {
-        stage = Stage.NEW; index = 0; y = 0; structureBottom = Integer.MIN_VALUE;
+        stage = Stage.NEW; index = 0; y = 0; structureBottom = Integer.MIN_VALUE; spongeMaintenanceTick = Long.MIN_VALUE;
         floors = new int[0]; sandTops = new int[0]; scaffolds = new LinkedHashSet<>();
         completed = new java.util.BitSet(); heights = new int[0];
         travel = null; routePhase = 0; stuck = 0; checkpoint = null; route.clear();

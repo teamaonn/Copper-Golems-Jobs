@@ -25,6 +25,7 @@ public final class WorkerBrain {
         if (state.job == Job.DRAIN) DrainJobs.motion(level, golem, state);
         if (state.cooldown > 0) state.cooldown--;
         if (golem.tickCount % 10 != 0) return;
+        if(state.job==Job.DRAIN) DrainJobs.maintenance(level,golem,state);
         if(state.job==Job.PICKAXE) WorkerProjects.quarry(level,golem,state);
         ChestStorage storage = ChestStorage.nearby(level, golem);
         if (!storage.exists()) { wait(golem, state, "No Copper Chest within "+state.job.chestRange()+" blocks"); return; }

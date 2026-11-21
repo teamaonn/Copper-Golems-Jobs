@@ -412,6 +412,65 @@ public final class WorkerGameTests {
         first.discard();second.discard();helper.succeed();
     }
 
+    @GameTest(maxTicks = 100, skyAccess = true, padding = 80)
+    public void drainSpongeCleanup(GameTestHelper helper) {
+        ServerLevel level=helper.getLevel();BlockPos base=helper.absolutePos(new BlockPos(4,12,4));
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-4,-6,-4),base.offset(4,3,4)))
+            level.setBlock(p,p.getY()==base.getY()-6?Blocks.STONE.defaultBlockState():Blocks.AIR.defaultBlockState(),2);
+        CopperGolem g=EntityTypes.COPPER_GOLEM.create(level,net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+        g.setPos(Vec3.atBottomCenterOf(base.above()));g.setNoAi(true);level.addFreshEntity(g);
+        WorkerState s=((WorkerAccess)g).copperJobs$state();s.assign(Job.DRAIN,base.above(),Direction.NORTH);
+        s.drain.begin(new net.minecraft.world.level.levelgen.structure.BoundingBox(base.getX()-1,base.getY()-6,base.getZ()-1,
+                base.getX()+1,base.getY()-2,base.getZ()+1),base.getY());
+        java.util.Arrays.fill(s.drain.floors,base.getY()-6);s.drain.stage=DrainState.Stage.DONE;
+        BlockPos dry=base.east(2).above(2),wet=base.offset(-2,-3,0),room=base.below(3),outside=base.offset(4,-1,0);
+        level.setBlock(dry,Blocks.SPONGE.defaultBlockState(),2);level.setBlock(wet,Blocks.WET_SPONGE.defaultBlockState(),2);
+        level.setBlock(room,Blocks.WET_SPONGE.defaultBlockState(),2);level.setBlock(room.above(),Blocks.PRISMARINE.defaultBlockState(),2);
+        level.setBlock(outside,Blocks.SPONGE.defaultBlockState(),2);
+        BlockPos chestPos=base.offset(0,1,3);
+        level.setBlock(chestPos,BuiltInRegistries.BLOCK.getValue(Identifier.withDefaultNamespace("copper_chest")).defaultBlockState(),2);
+        Container chest=(Container)level.getBlockEntity(chestPos);
+        for(int slot=0;slot<chest.getContainerSize();slot++)chest.setItem(slot,new ItemStack(Items.COBBLESTONE,64));
+        g.tickCount=10;WorkerBrain.tick(level,g,s);
+        check(level.getBlockState(dry).isAir()&&level.getBlockState(wet).isAir(),"dry and wet exterior sponges poof even with full storage and a finished drain crew");
+        check(level.getBlockState(room).is(Blocks.WET_SPONGE)&&level.getBlockState(outside).is(Blocks.SPONGE),
+                "sponge cleanup preserves enclosed monument rooms and blocks outside the drain project");
+        check(count(chest,Items.SPONGE)==0&&count(chest,Items.WET_SPONGE)==0&&s.pending.isEmpty(),"sponge cleanup generates no chest payout");
+        check(level.getEntitiesOfClass(net.minecraft.world.entity.item.ItemEntity.class,new net.minecraft.world.phys.AABB(base).inflate(8)).isEmpty(),
+                "sponge cleanup creates no loose item drops");
+        g.discard();helper.succeed();
+    }
+
+    @GameTest(maxTicks = 100, skyAccess = true, padding = 80)
+    public void drainHelpersFinishClaimedColumn(GameTestHelper helper) {
+        ServerLevel level=helper.getLevel();BlockPos base=helper.absolutePos(new BlockPos(4,26,4));
+        CopperGolem[] crew=new CopperGolem[2];WorkerState[] states=new WorkerState[2];
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-4,-21,-4),base.offset(4,3,4)))
+            level.setBlock(p,p.getY()==base.getY()-21?Blocks.STONE.defaultBlockState():Blocks.AIR.defaultBlockState(),2);
+        for(int i=0;i<2;i++) {
+            crew[i]=EntityTypes.COPPER_GOLEM.create(level,net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+            crew[i].setNoAi(true);level.addFreshEntity(crew[i]);states[i]=((WorkerAccess)crew[i]).copperJobs$state();
+            states[i].assign(Job.DRAIN,base.above(),Direction.NORTH);
+            states[i].drain.begin(new net.minecraft.world.level.levelgen.structure.BoundingBox(base.getX()-1,base.getY()-21,base.getZ()-1,
+                    base.getX()+1,base.getY()-2,base.getZ()+1),base.getY());
+            states[i].drain.stage=DrainState.Stage.FILL;
+            java.util.Arrays.fill(states[i].drain.floors,base.getY()-21);
+            states[i].drain.completed.set(0,states[i].drain.columns());states[i].drain.completed.clear(8);
+            states[i].drain.index=states[i].drain.columns();
+        }
+        DrainTeam team=DrainTeam.join(level,crew[0],states[0]);DrainTeam.join(level,crew[1],states[1]);
+        check(team.column(crew[0],states[0])&&states[0].drain.index==8,"primary worker claims the remaining interior column");
+        check(team.column(crew[1],states[1])&&states[1].drain.index==8,"available worker assists an already claimed column instead of waiting");
+        BlockPos top=states[1].drain.column(8,base.getY());
+        crew[1].setPos(Vec3.atBottomCenterOf(top.above()));
+        // The primary never works: its helper must finish the remaining job itself.
+        for(int n=0;n<10&&states[1].drain.stage==DrainState.Stage.FILL;n++)
+            DrainJobs.work(level,crew[1],states[1],ChestStorage.nearby(level,crew[1]));
+        check(states[0].drain.stage==DrainState.Stage.WALLS&&states[1].drain.stage==DrainState.Stage.WALLS
+                &&states[1].drain.sandTops[8]==base.getY(),"helper completes claimed work and advances the whole crew without losing sand ownership");
+        for(CopperGolem g:crew)g.discard();helper.succeed();
+    }
+
     @GameTest(maxTicks = 200, skyAccess = true, padding = 80)
     public void drainCrewBarrierRecovery(GameTestHelper helper) {
         ServerLevel level=helper.getLevel();BlockPos base=helper.absolutePos(new BlockPos(4,8,4));

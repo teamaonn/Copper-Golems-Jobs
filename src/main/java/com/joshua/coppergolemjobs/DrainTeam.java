@@ -56,9 +56,10 @@ final class DrainTeam {
 
     static DrainTeam join(ServerLevel level, CopperGolem golem, WorkerState worker) {
         DrainState d = worker.drain;
-        if(d.finishVersion==0 && (d.stage==DrainState.Stage.RETURN || d.stage==DrainState.Stage.CLEANUP || d.stage==DrainState.Stage.DONE)) {
+        if(d.finishVersion<2 && d.stage.ordinal()>=DrainState.Stage.REPAIR_WALLS.ordinal()) {
             d.next(DrainState.Stage.REPAIR_WALLS);
-            d.finishVersion=1;
+            d.finishVersion=2; d.repairPass++;
+            d.cleanupFloors=new int[d.columns()]; java.util.Arrays.fill(d.cleanupFloors,Integer.MIN_VALUE);
         }
         Site site = new Site(d.minX, d.maxX, d.minZ, d.maxZ, d.surfaceY);
         Map<Site, DrainTeam> teams = LEVELS.computeIfAbsent(level, ignored -> new HashMap<>());
@@ -67,14 +68,18 @@ final class DrainTeam {
         team.empty(level.getGameTime());
         team.members.put(golem.getUUID(), new Member(new WeakReference<>(golem), worker, level.getGameTime()));
         if (team.progress == null) team.progress = snapshot(d);
-        else if (d != team.progress && d.stage.ordinal() > team.progress.stage.ordinal()) {
+        else if (d != team.progress && newer(d,team.progress)) {
             team.progress = snapshot(d);
             team.claims.clear();
             team.returned.clear();
-        } else if (d != team.progress && d.stage == team.progress.stage && d.completed != team.progress.completed) {
+        } else if (d != team.progress && d.stage == team.progress.stage && d.repairPass==team.progress.repairPass
+                && (!d.rowCleanup() || d.cleanupLayer==team.progress.cleanupLayer) && d.completed != team.progress.completed) {
             DrainState p = team.progress;
             p.completed.or(d.completed);
             p.scaffolds.addAll(d.scaffolds);
+            p.cleanupGlass.addAll(d.cleanupGlass);
+            if(p.stage==DrainState.Stage.REPAIR_RELEASE)p.cleanupGlass.removeIf(pos ->
+                    pos.getY()==p.cleanupLayer && p.completed.get((pos.getZ()-p.minZ)*p.width()));
             p.bottomY = Math.min(p.bottomY, d.bottomY);
             for (int i = 0;i<d.columns();i++) {
                 if (p.floors[i] == Integer.MIN_VALUE) p.floors[i] = d.floors[i];
@@ -89,6 +94,13 @@ final class DrainTeam {
         return team;
     }
 
+    private static boolean newer(DrainState incoming,DrainState current) {
+        if(incoming.repairPass!=current.repairPass)return incoming.repairPass>current.repairPass;
+        if(incoming.rowCleanup()&&current.rowCleanup()&&incoming.cleanupLayer!=current.cleanupLayer)
+            return incoming.cleanupLayer<current.cleanupLayer;
+        return incoming.stage.ordinal()>current.stage.ordinal();
+    }
+
     private static DrainState snapshot(DrainState d) {
         DrainState p = new DrainState();
         p.minX = d.minX;
@@ -98,6 +110,8 @@ final class DrainTeam {
         p.surfaceY = d.surfaceY;
         p.structureBottom = d.structureBottom;
         p.finishVersion = d.finishVersion;
+        p.repairPass = d.repairPass; p.cleanupLayer = d.cleanupLayer;
+        p.cleanupFloors = d.cleanupFloors; p.cleanupGlass = d.cleanupGlass;
         p.bottomY = d.bottomY;
         p.stage = d.stage;
         p.floors = d.floors;
@@ -132,6 +146,8 @@ final class DrainTeam {
             d.bottomY = progress.bottomY;
             d.structureBottom = progress.structureBottom;
             d.finishVersion = progress.finishVersion;
+            d.repairPass = progress.repairPass; d.cleanupLayer = progress.cleanupLayer;
+            d.cleanupFloors = progress.cleanupFloors; d.cleanupGlass = progress.cleanupGlass;
             d.floors = progress.floors;
             d.sandTops = progress.sandTops;
             d.scaffolds = progress.scaffolds;
@@ -154,7 +170,8 @@ final class DrainTeam {
                 case VERIFY -> DrainState.Stage.REMOVE;
                 case REMOVE -> DrainState.Stage.REPAIR_WALLS;
                 case REPAIR_WALLS -> DrainState.Stage.REPAIR_WATER;
-                case REPAIR_WATER -> DrainState.Stage.CHECK_DRY;
+                case REPAIR_WATER -> DrainState.Stage.REPAIR_RELEASE;
+                case REPAIR_RELEASE -> DrainState.Stage.REPAIR_WATER;
                 case CHECK_DRY -> DrainState.Stage.RETURN;
                 default -> null;
             };
@@ -283,8 +300,22 @@ final class DrainTeam {
     }
 
     void advance(DrainState.Stage next) {
+        DrainState.Stage before=progress.stage;
+        if(before==DrainState.Stage.REPAIR_RELEASE&&next==DrainState.Stage.REPAIR_WATER) {
+            progress.cleanupLayer--;
+            int bottom=progress.structureBottom==Integer.MIN_VALUE?progress.bottomY:Math.min(progress.bottomY,progress.structureBottom);
+            if(progress.cleanupLayer<bottom)next=DrainState.Stage.CHECK_DRY;
+        } else if(next==DrainState.Stage.REPAIR_WATER)progress.cleanupLayer=progress.surfaceY;
         progress.next(next);
-        if(next==DrainState.Stage.REPAIR_WALLS)progress.finishVersion=1;
+        if(next==DrainState.Stage.REPAIR_WALLS) {
+            progress.finishVersion=2; progress.repairPass++;
+            progress.cleanupFloors=new int[progress.columns()];java.util.Arrays.fill(progress.cleanupFloors,Integer.MIN_VALUE);
+        }
+        if(progress.rowCleanup()) {
+            // Only the first column of each interior row represents a row task.
+            progress.completed.set(0,progress.columns());
+            for(int row=1;row<progress.depth()-1;row++)progress.completed.clear(row*progress.width());
+        }
         claims.clear();
         returned.clear();
         syncAll();

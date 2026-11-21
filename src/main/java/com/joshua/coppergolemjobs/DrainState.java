@@ -10,10 +10,13 @@ import java.util.Set;
 
 /** Compact per-column sand ownership; no list containing hundreds of thousands of blocks. */
 public final class DrainState {
-    public enum Stage { NEW, SURVEY, CLEAR, SURFACE, FILL, WALLS, VERIFY, REMOVE, REPAIR_WALLS, REPAIR_WATER, CHECK_DRY, RETURN, CLEANUP, DONE }
+    public enum Stage { NEW, SURVEY, CLEAR, SURFACE, FILL, WALLS, VERIFY, REMOVE, REPAIR_WALLS, REPAIR_WATER, REPAIR_RELEASE, CHECK_DRY, RETURN, CLEANUP, DONE }
     public Stage stage = Stage.NEW;
     public int minX, maxX, minZ, maxZ, surfaceY, bottomY, index, y;
-    public int finishVersion;
+    public int finishVersion, repairPass, cleanupLayer;
+    public int[] cleanupFloors = new int[0];
+    public Set<BlockPos> cleanupGlass = new LinkedHashSet<>();
+    public boolean rowCleanup() { return stage==Stage.REPAIR_WATER || stage==Stage.REPAIR_RELEASE; }
     public int structureBottom = Integer.MIN_VALUE;
     public int[] floors = new int[0];
     public int[] sandTops = new int[0];
@@ -41,7 +44,9 @@ public final class DrainState {
         // One clear column between the monument footprint and the permanent wall.
         minX = monument.minX() - 2; maxX = monument.maxX() + 2;
         minZ = monument.minZ() - 2; maxZ = monument.maxZ() + 2;
-        finishVersion = 0;
+        finishVersion = 0; repairPass = 0; cleanupLayer = surface;
+        cleanupFloors = new int[(monument.getXSpan()+4)*(monument.getZSpan()+4)];
+        java.util.Arrays.fill(cleanupFloors,Integer.MIN_VALUE); cleanupGlass = new LinkedHashSet<>();
         structureBottom = monument.minY();
         surfaceY = surface; bottomY = surface; index = 0; y = surface;
         floors = new int[columns()]; sandTops = new int[columns()];
@@ -52,7 +57,7 @@ public final class DrainState {
         stage = Stage.SURVEY;
     }
     public void reset() {
-        stage = Stage.NEW; index = 0; y = 0; finishVersion = 0; structureBottom = Integer.MIN_VALUE; spongeMaintenanceTick = Long.MIN_VALUE;
+        stage = Stage.NEW; index = 0; y = 0; finishVersion = 0; repairPass = 0; cleanupLayer = 0; cleanupFloors = new int[0]; cleanupGlass = new LinkedHashSet<>(); structureBottom = Integer.MIN_VALUE; spongeMaintenanceTick = Long.MIN_VALUE;
         floors = new int[0]; sandTops = new int[0]; scaffolds = new LinkedHashSet<>();
         completed = new java.util.BitSet(); heights = new int[0];
         travel = null; routePhase = 0; stuck = 0; checkpoint = null; route.clear();
@@ -67,6 +72,10 @@ public final class DrainState {
         if (stage == Stage.NEW) return;
         out.putIntArray("DrainBounds", new int[]{minX,maxX,minZ,maxZ,surfaceY,bottomY,index,y});
         out.putInt("DrainFinishVersion", finishVersion);
+        out.putInt("DrainRepairPass", repairPass);
+        out.putInt("DrainCleanupLayer", cleanupLayer);
+        out.putIntArray("DrainCleanupFloors", cleanupFloors);
+        out.store("DrainCleanupGlass", BlockPos.CODEC.listOf(), new ArrayList<>(cleanupGlass));
         out.putInt("DrainStructureBottom", structureBottom);
         out.putIntArray("DrainFloors", floors);
         out.putIntArray("DrainSandTops", sandTops);
@@ -83,6 +92,11 @@ public final class DrainState {
         if (b.length != 8 || b[1] < b[0] || b[3] < b[2] || (long)b[1]-b[0] > 100 || (long)b[3]-b[2] > 100) { reset(); return; }
         minX=b[0];maxX=b[1];minZ=b[2];maxZ=b[3];surfaceY=b[4];bottomY=b[5];index=b[6];y=b[7];
         finishVersion=in.getIntOr("DrainFinishVersion", 0);
+        repairPass=in.getIntOr("DrainRepairPass", 0);
+        cleanupLayer=in.getIntOr("DrainCleanupLayer", surfaceY);
+        cleanupFloors=in.getIntArray("DrainCleanupFloors").orElse(new int[columns()]);
+        if(cleanupFloors.length!=columns())cleanupFloors=new int[columns()];
+        cleanupGlass.addAll(in.read("DrainCleanupGlass", BlockPos.CODEC.listOf()).orElse(java.util.List.of()));
         structureBottom=in.getIntOr("DrainStructureBottom", Integer.MIN_VALUE);
         floors=in.getIntArray("DrainFloors").orElse(new int[0]);
         sandTops=in.getIntArray("DrainSandTops").orElse(new int[0]);

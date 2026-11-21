@@ -56,7 +56,8 @@ public final class DrainJobs {
         Vec3 waypoint;
         if (d.routePhase == 0) {
             if (g.getY() >= d.surfaceY + 1.08 || horizontal < .1) d.routePhase = 1;
-            waypoint = new Vec3(g.getX(), d.surfaceY + 1.1, g.getZ());
+            // Move off a wall edge while rising so the golem's body clears the rim.
+            waypoint = new Vec3(g.blockPosition().getX()+.5, d.surfaceY + 1.1, g.blockPosition().getZ()+.5);
         } else if (d.routePhase == 1) {
             if (horizontal < .015) { d.routePhase = 2; waypoint = new Vec3(end.x,d.surfaceY+1.1,end.z); }
             else {
@@ -173,7 +174,7 @@ public final class DrainJobs {
             }
         }
         for(int budget=0;budget<32;budget++) {
-            if (switch(d.stage) { case SURVEY, CLEAR, FILL, WALLS, VERIFY, REMOVE, REPAIR_WALLS, REPAIR_WATER, CHECK_DRY -> !team.column(g,s); default -> false; }) return;
+            if (switch(d.stage) { case SURVEY, CLEAR, FILL, WALLS, VERIFY, REMOVE, REPAIR_WALLS, REPAIR_WATER, REPAIR_RELEASE, CHECK_DRY -> !team.column(g,s); default -> false; }) return;
             DrainState.Stage before=d.stage;
             int column=d.index;
             switch(d.stage) {
@@ -188,8 +189,9 @@ public final class DrainJobs {
                 case VERIFY -> walls(level,g,s,true,team,storage);
                 case REMOVE -> remove(level,g,s,team);
                 case REPAIR_WALLS -> walls(level,g,s,false,team,storage);
-                case REPAIR_WATER -> repairWater(level,g,s,storage,team,false);
-                case CHECK_DRY -> repairWater(level,g,s,storage,team,true);
+                case REPAIR_WATER -> repairRow(level,g,s,storage,team,false);
+                case REPAIR_RELEASE -> repairRow(level,g,s,storage,team,true);
+                case CHECK_DRY -> checkDry(level,g,s,team);
                 case RETURN -> {
                     s.status="Returning to starting platform";
                     if (arrive(level,g,s,s.origin)) team.home(g,DrainState.Stage.CLEANUP);
@@ -198,6 +200,7 @@ public final class DrainJobs {
                 default -> {}
             }
             team.checkpoint(d);
+            if(before==DrainState.Stage.REPAIR_WATER || before==DrainState.Stage.REPAIR_RELEASE || d.rowCleanup())return;
             if(d.stage==before && d.index==column) return;
             if(d.stage==DrainState.Stage.DONE)return;
         }
@@ -325,6 +328,16 @@ public final class DrainJobs {
                         if(!drops.isEmpty()&&!transaction.commit())s.pending.addAll(drops);
                     }
                 }
+                if(d.stage==DrainState.Stage.REPAIR_WALLS) {
+                    int roof=repairBottom(level,d);
+                    for(int y=d.surfaceY;y>=roof;y--) {
+                        BlockPos q=d.column(d.index,y);BlockState block=level.getBlockState(q);
+                        if(team.platform(q)||d.scaffolds.contains(q)||d.cleanupGlass.contains(q))continue;
+                        if(block.is(Blocks.SAND)&&y>d.floors[d.index])continue;
+                        if(!block.getCollisionShape(level,q).isEmpty()&&!sponge(block)&&!plant(block)) { roof=y;break; }
+                    }
+                    d.cleanupFloors[d.index]=roof;
+                }
                 team.complete(g,d,next);return;
             }
             if(d.y>d.surfaceY){team.complete(g,d,next);return;}
@@ -367,39 +380,62 @@ public final class DrainJobs {
                 ||(b.is(Blocks.SAND)&&d.floors[column]!=Integer.MIN_VALUE&&y>d.floors[column]);
     }
 
-    /** Inspect actual exterior blocks, stopping at the solid roof above a monument room. */
-    private static void repairWater(ServerLevel level,CopperGolem g,WorkerState s,ChestStorage storage,DrainTeam team,boolean verify) {
+    /** One complete horizontal row per action; temporary glass prevents source regeneration. */
+    private static void repairRow(ServerLevel level,CopperGolem g,WorkerState s,ChestStorage storage,DrainTeam team,boolean release) {
         DrainState d=s.drain;
-        s.status=verify?"Checking the drain area is dry":"Removing remaining exterior water";
-        DrainState.Stage next=verify?DrainState.Stage.RETURN:DrainState.Stage.CHECK_DRY;
-        if(d.wall(d.column(d.index,d.surfaceY))) { team.complete(g,d,next);return; }
-        int limit=repairBottom(level,d);
-        for(int budget=0;budget<128;budget++) {
-            if(d.y<limit) { team.complete(g,d,next);return; }
-            BlockPos p=d.column(d.index,d.y);
-            if(!WorkerBrain.loaded(level,p)) { WorkerBrain.wait(g,s,"Waiting for final drain-check chunks");return; }
-            BlockState b=level.getBlockState(p);
-            if((b.is(Blocks.GLASS)&&d.scaffolds.contains(p))||team.platform(p)) { d.y--;continue; }
-            if(needsRepair(b,d,d.index,d.y)) {
-                if(verify) { team.advance(DrainState.Stage.REPAIR_WALLS);return; }
-                // Keep the monument block itself when its exposed face is waterlogged.
-                BlockState replacement=b.hasProperty(BlockStateProperties.WATERLOGGED)
-                        ?b.setValue(BlockStateProperties.WATERLOGGED,false):Blocks.AIR.defaultBlockState();
-                boolean upper=b.is(Blocks.TALL_SEAGRASS)&&b.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF)==DoubleBlockHalf.UPPER;
-                var drops=plant(b)&&!upper?List.of(new ItemStack(b.is(Blocks.KELP)||b.is(Blocks.KELP_PLANT)?Items.KELP:Items.SEAGRASS)):List.<ItemStack>of();
-                var transaction=storage.plan();
-                if(!drops.isEmpty()&&(!transaction.add(drops)||!transaction.unchanged())) {
-                    WorkerBrain.wait(g,s,"Chest needs room for remaining kelp or seagrass");return;
-                }
-                if(!level.setBlock(p,replacement,Block.UPDATE_ALL))return;
-                if(!drops.isEmpty()&&!transaction.commit())s.pending.addAll(drops);
-                if(b.is(Blocks.SAND)&&d.sandTops[d.index]>=d.y)d.sandTops[d.index]=d.y-1;
-                stop(g,s);
-                // A solid roof remains the boundary; never continue into the room below it.
-                if(!replacement.getCollisionShape(level,p).isEmpty()) { team.complete(g,d,next);return; }
-                d.y--;return;
+        int row=d.index/d.width(),y=d.cleanupLayer,z=d.minZ+row;
+        DrainState.Stage next=release?DrainState.Stage.REPAIR_WATER:DrainState.Stage.REPAIR_RELEASE;
+        s.status=(release?"Clearing temporary glass row ":"Draining surface row ")+row+" at Y="+y;
+        if(row<=0||row>=d.depth()-1||d.index%d.width()!=0) {team.complete(g,d,next);return;}
+        var changes=new java.util.LinkedHashMap<BlockPos,BlockState>();
+        var drops=new java.util.ArrayList<ItemStack>();
+        for(int x=d.minX+1;x<d.maxX;x++) {
+            BlockPos p=new BlockPos(x,y,z);
+            if(!WorkerBrain.loaded(level,p)){WorkerBrain.wait(g,s,"Waiting for cleanup-row chunks");return;}
+            BlockState block=level.getBlockState(p);
+            if(release) {
+                if(d.cleanupGlass.contains(p)&&block.is(Blocks.GLASS))changes.put(p,Blocks.AIR.defaultBlockState());
+                continue;
             }
-            if(!b.getCollisionShape(level,p).isEmpty()) { team.complete(g,d,next);return; }
+            int c=row*d.width()+(row%2==0?x-d.minX:d.maxX-x);
+            if(y<d.cleanupFloors[c]||team.platform(p)||d.scaffolds.contains(p))continue;
+            if(block.hasProperty(BlockStateProperties.WATERLOGGED)&&block.getValue(BlockStateProperties.WATERLOGGED)) {
+                changes.put(p,block.setValue(BlockStateProperties.WATERLOGGED,false));continue;
+            }
+            if(open(block)||(block.is(Blocks.SAND)&&y>d.floors[c])) {
+                changes.put(p,Blocks.GLASS.defaultBlockState());
+                boolean upper=block.is(Blocks.TALL_SEAGRASS)&&block.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF)==DoubleBlockHalf.UPPER;
+                if(plant(block)&&!upper)drops.add(new ItemStack(block.is(Blocks.KELP)||block.is(Blocks.KELP_PLANT)?Items.KELP:Items.SEAGRASS));
+            }
+        }
+        var transaction=storage.plan();
+        if(!drops.isEmpty()&&(!transaction.add(drops)||!transaction.unchanged())) {
+            WorkerBrain.wait(g,s,"Chest needs room for cleanup-row vegetation");return;
+        }
+        for(var change:changes.entrySet()) {
+            if(!level.setBlock(change.getKey(),change.getValue(),Block.UPDATE_ALL))return;
+            if(release)d.cleanupGlass.remove(change.getKey());
+            else if(change.getValue().is(Blocks.GLASS))d.cleanupGlass.add(change.getKey());
+        }
+        if(release)for(int x=d.minX+1;x<d.maxX;x++)d.cleanupGlass.remove(new BlockPos(x,y,z));
+        if(!drops.isEmpty()&&!transaction.commit())s.pending.addAll(drops);
+        stop(g,s);
+        if(!changes.isEmpty())g.swing(InteractionHand.MAIN_HAND, net.minecraft.world.item.component.SwingAnimation.DEFAULT);
+        team.complete(g,d,next);
+    }
+
+    /** Check actual exterior blocks after the crew has finished every surface layer. */
+    private static void checkDry(ServerLevel level,CopperGolem g,WorkerState s,DrainTeam team) {
+        DrainState d=s.drain;s.status="Checking the drain area is dry";
+        if(d.wall(d.column(d.index,d.surfaceY))) {team.complete(g,d,DrainState.Stage.RETURN);return;}
+        for(int budget=0;budget<128;budget++) {
+            if(d.y<repairBottom(level,d)) {team.complete(g,d,DrainState.Stage.RETURN);return;}
+            BlockPos p=d.column(d.index,d.y);
+            if(!WorkerBrain.loaded(level,p)) {WorkerBrain.wait(g,s,"Waiting for final drain-check chunks");return;}
+            BlockState block=level.getBlockState(p);
+            if((block.is(Blocks.GLASS)&&d.scaffolds.contains(p))||team.platform(p)) {d.y--;continue;}
+            if(needsRepair(block,d,d.index,d.y)) {team.advance(DrainState.Stage.REPAIR_WALLS);return;}
+            if(!block.getCollisionShape(level,p).isEmpty()) {team.complete(g,d,DrainState.Stage.RETURN);return;}
             d.y--;
         }
     }

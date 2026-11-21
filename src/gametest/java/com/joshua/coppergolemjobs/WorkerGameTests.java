@@ -416,6 +416,63 @@ public final class WorkerGameTests {
         first.discard();second.discard();helper.succeed();
     }
 
+    @GameTest(maxTicks = 200, skyAccess = true, padding = 80)
+    public void drainSurfaceRows(GameTestHelper helper) {
+        ServerLevel level=helper.getLevel();BlockPos base=helper.absolutePos(new BlockPos(4,10,4));
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-4,-4,-4),base.offset(4,3,4)))
+            level.setBlock(p,p.getY()==base.getY()-4?Blocks.STONE.defaultBlockState():
+                    p.getY()<=base.getY()?Blocks.WATER.defaultBlockState():Blocks.AIR.defaultBlockState(),2);
+        level.setBlock(base,Blocks.COBBLESTONE.defaultBlockState(),2);
+        CopperGolem[] crew=new CopperGolem[2];WorkerState[] states=new WorkerState[2];
+        for(int i=0;i<2;i++) {
+            crew[i]=EntityTypes.COPPER_GOLEM.create(level,net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+            crew[i].setPos(Vec3.atBottomCenterOf(base.above()));crew[i].setNoAi(true);level.addFreshEntity(crew[i]);
+            states[i]=((WorkerAccess)crew[i]).copperJobs$state();states[i].assign(Job.DRAIN,base.above(),Direction.NORTH);
+            states[i].drain.begin(new net.minecraft.world.level.levelgen.structure.BoundingBox(base.getX()-1,base.getY()-4,base.getZ()-1,
+                    base.getX()+1,base.getY()-2,base.getZ()+1),base.getY());
+            states[i].drain.stage=DrainState.Stage.REPAIR_WALLS;states[i].drain.finishVersion=2;
+            states[i].drain.bottomY=base.getY()-4;java.util.Arrays.fill(states[i].drain.floors,base.getY()-4);
+        }
+        for(int n=0;n<200&&states[0].drain.stage!=DrainState.Stage.REPAIR_WATER;n++)
+            for(int i=0;i<2&&states[0].drain.stage!=DrainState.Stage.REPAIR_WATER;i++)DrainJobs.work(level,crew[i],states[i],ChestStorage.nearby(level,crew[i]));
+        check(states[0].drain.stage==DrainState.Stage.REPAIR_WATER,"crew finishes shared sealing before row cleanup");
+        DrainJobs.work(level,crew[0],states[0],ChestStorage.nearby(level,crew[0]));
+        for(int x=-2;x<=2;x++)checkQuiet(level.getBlockState(base.offset(x,0,-2)).is(Blocks.GLASS),"one worker action seals every source in a complete surface row");
+        check(states[0].drain.cleanupGlass.size()==5&&level.getBlockState(base.offset(2,0,2)).is(Blocks.WATER),
+                "a complete five-block row is isolated while other rows still contain sources");
+        DrainJobs.work(level,crew[1],states[1],ChestStorage.nearby(level,crew[1]));
+        for(int x=-2;x<=2;x++)checkQuiet(level.getBlockState(base.offset(x,0,-1)).is(Blocks.GLASS),"teammates take separate remaining rows");
+        var out=TagValueOutput.createWithContext(ProblemReporter.DISCARDING,level.registryAccess());states[1].save(out);
+        var earlier=out.buildResult();
+        states[1].load(TagValueInput.create(ProblemReporter.DISCARDING,level.registryAccess(),earlier));
+        check(states[1].drain.cleanupGlass.size()==10,"temporary row-glass ownership survives save and reload");
+        for(int n=0;n<20&&states[0].drain.stage==DrainState.Stage.REPAIR_WATER;n++)
+            DrainJobs.work(level,crew[0],states[0],ChestStorage.nearby(level,crew[0]));
+        check(states[0].drain.stage==DrainState.Stage.REPAIR_RELEASE,"crew removes row separators only after the entire layer is source-free");
+        var releaseSave=TagValueOutput.createWithContext(ProblemReporter.DISCARDING,level.registryAccess());states[1].save(releaseSave);
+        var earlierRelease=releaseSave.buildResult();
+        DrainJobs.work(level,crew[0],states[0],ChestStorage.nearby(level,crew[0]));
+        for(int x=-2;x<=2;x++)checkQuiet(level.getBlockState(base.offset(x,0,-2)).isAir(),"one worker action reabsorbs a complete row of temporary glass");
+        states[1].load(TagValueInput.create(ProblemReporter.DISCARDING,level.registryAccess(),earlierRelease));
+        DrainTeam.join(level,crew[1],states[1]);
+        check(!states[1].drain.cleanupGlass.contains(base.offset(2,0,-2)),"merging a stale release save cannot restore ownership of an already cleared row");
+        check(level.getBlockState(base.offset(2,-1,-2)).is(Blocks.WATER)&&level.getBlockState(base.offset(2,0,-1)).is(Blocks.GLASS),
+                "crew finishes releasing the current layer before draining the next layer down");
+        for(int n=0;n<20&&states[0].drain.stage==DrainState.Stage.REPAIR_RELEASE;n++)
+            DrainJobs.work(level,crew[0],states[0],ChestStorage.nearby(level,crew[0]));
+        check(states[0].drain.cleanupLayer==base.getY()-1,"crew advances down one layer together");
+        states[1].load(TagValueInput.create(ProblemReporter.DISCARDING,level.registryAccess(),earlier));
+        DrainTeam.join(level,crew[1],states[1]);
+        check(states[1].drain.cleanupLayer==base.getY()-1&&states[1].drain.cleanupGlass.isEmpty(),
+                "a stale upper-layer save cannot rewind cleanup or restore already reabsorbed glass");
+        for(int n=0;n<10000&&states[0].drain.stage!=DrainState.Stage.DONE;n++)for(int i=0;i<2;i++) {
+            if(states[i].drain.travel!=null)crew[i].setPos(Vec3.atBottomCenterOf(states[i].drain.travel));
+            DrainJobs.work(level,crew[i],states[i],ChestStorage.nearby(level,crew[i]));
+        }
+        check(states[0].drain.stage==DrainState.Stage.DONE&&states[0].drain.cleanupGlass.isEmpty(),"layer-by-layer row cleanup finishes with no temporary glass left behind");
+        for(CopperGolem g:crew)g.discard();helper.succeed();
+    }
+
     @GameTest(maxTicks = 100, skyAccess = true, padding = 80)
     public void returningCrewRepairsWater(GameTestHelper helper) {
         ServerLevel level=helper.getLevel();BlockPos base=helper.absolutePos(new BlockPos(4,10,4));
@@ -452,7 +509,7 @@ public final class WorkerGameTests {
             if(s.drain.stage==DrainState.Stage.REPAIR_WATER&&!reloaded) {
                 var out=TagValueOutput.createWithContext(ProblemReporter.DISCARDING,level.registryAccess());s.save(out);
                 s.load(TagValueInput.create(ProblemReporter.DISCARDING,level.registryAccess(),out.buildResult()));
-                checkQuiet(s.drain.finishVersion==1,"final repair migration survives save and reload");reloaded=true;
+                checkQuiet(s.drain.finishVersion==2,"final repair migration survives save and reload");reloaded=true;
             }
         }
         check(repaired&&reloaded&&s.drain.stage==DrainState.Stage.DONE,"returning legacy crew resumes sealing and removes remaining water despite stale survey heights");
@@ -533,10 +590,10 @@ public final class WorkerGameTests {
         CopperGolem[] crew=new CopperGolem[64];WorkerState[] states=new WorkerState[64];
         var stages=new DrainState.Stage[]{DrainState.Stage.SURVEY,DrainState.Stage.CLEAR,DrainState.Stage.FILL,
                 DrainState.Stage.WALLS,DrainState.Stage.VERIFY,DrainState.Stage.REMOVE,
-                DrainState.Stage.REPAIR_WALLS,DrainState.Stage.REPAIR_WATER,DrainState.Stage.CHECK_DRY};
+                DrainState.Stage.REPAIR_WALLS,DrainState.Stage.REPAIR_WATER,DrainState.Stage.REPAIR_RELEASE,DrainState.Stage.CHECK_DRY};
         var next=new DrainState.Stage[]{DrainState.Stage.CLEAR,DrainState.Stage.SURFACE,DrainState.Stage.WALLS,
                 DrainState.Stage.VERIFY,DrainState.Stage.REMOVE,DrainState.Stage.REPAIR_WALLS,
-                DrainState.Stage.REPAIR_WATER,DrainState.Stage.CHECK_DRY,DrainState.Stage.RETURN};
+                DrainState.Stage.REPAIR_WATER,DrainState.Stage.REPAIR_RELEASE,DrainState.Stage.REPAIR_WATER,DrainState.Stage.RETURN};
         for(int n=0;n<stages.length;n++) {
             // Separate sites keep each simulated restart independent of the live team cache.
             BlockPos site=base.above(n*2);
@@ -550,6 +607,7 @@ public final class WorkerGameTests {
                 s.drain.begin(new net.minecraft.world.level.levelgen.structure.BoundingBox(site.getX()-1,site.getY()-4,site.getZ()-1,
                         site.getX()+1,site.getY()-2,site.getZ()+1),site.getY());
                 s.drain.stage=stages[n];s.drain.bottomY=site.getY()-4;
+                s.drain.finishVersion=2;s.drain.cleanupLayer=site.getY();
                 java.util.Arrays.fill(s.drain.floors,site.getY()-4);
                 java.util.Arrays.fill(s.drain.sandTops,site.getY()-1);
                 s.drain.index=s.drain.columns();

@@ -21,6 +21,7 @@ final class DrainTeam {
     private final java.util.Set<UUID> returned = new java.util.HashSet<>();
     private DrainState progress;
     private int spongeColumn, spongeY = Integer.MAX_VALUE;
+    private int checkColumn, checkY = Integer.MAX_VALUE;
 
     static boolean joinExisting(ServerLevel level, CopperGolem golem, WorkerState worker) {
         CopperGolem sponsor = null;
@@ -55,6 +56,10 @@ final class DrainTeam {
 
     static DrainTeam join(ServerLevel level, CopperGolem golem, WorkerState worker) {
         DrainState d = worker.drain;
+        if(d.finishVersion==0 && (d.stage==DrainState.Stage.RETURN || d.stage==DrainState.Stage.CLEANUP || d.stage==DrainState.Stage.DONE)) {
+            d.next(DrainState.Stage.REPAIR_WALLS);
+            d.finishVersion=1;
+        }
         Site site = new Site(d.minX, d.maxX, d.minZ, d.maxZ, d.surfaceY);
         Map<Site, DrainTeam> teams = LEVELS.computeIfAbsent(level, ignored -> new HashMap<>());
         teams.entrySet().removeIf(entry -> entry.getValue().empty(level.getGameTime()));
@@ -92,6 +97,7 @@ final class DrainTeam {
         p.maxZ = d.maxZ;
         p.surfaceY = d.surfaceY;
         p.structureBottom = d.structureBottom;
+        p.finishVersion = d.finishVersion;
         p.bottomY = d.bottomY;
         p.stage = d.stage;
         p.floors = d.floors;
@@ -125,6 +131,7 @@ final class DrainTeam {
             d.stage = progress.stage;
             d.bottomY = progress.bottomY;
             d.structureBottom = progress.structureBottom;
+            d.finishVersion = progress.finishVersion;
             d.floors = progress.floors;
             d.sandTops = progress.sandTops;
             d.scaffolds = progress.scaffolds;
@@ -145,7 +152,10 @@ final class DrainTeam {
                 case FILL -> DrainState.Stage.WALLS;
                 case WALLS -> DrainState.Stage.VERIFY;
                 case VERIFY -> DrainState.Stage.REMOVE;
-                case REMOVE -> DrainState.Stage.RETURN;
+                case REMOVE -> DrainState.Stage.REPAIR_WALLS;
+                case REPAIR_WALLS -> DrainState.Stage.REPAIR_WATER;
+                case REPAIR_WATER -> DrainState.Stage.CHECK_DRY;
+                case CHECK_DRY -> DrainState.Stage.RETURN;
                 default -> null;
             };
             if (next != null) {
@@ -192,9 +202,16 @@ final class DrainTeam {
         }
         d.index = selected;
         d.y = d.heights[selected] == Integer.MIN_VALUE
-                ? (d.stage == DrainState.Stage.WALLS || d.stage == DrainState.Stage.VERIFY ? d.bottomY : d.surfaceY)
+                ? (d.stage == DrainState.Stage.WALLS || d.stage == DrainState.Stage.VERIFY || d.stage == DrainState.Stage.REPAIR_WALLS
+                        ? (d.stage == DrainState.Stage.REPAIR_WALLS && d.structureBottom != Integer.MIN_VALUE
+                            ? Math.min(d.bottomY,d.structureBottom) : d.bottomY) : d.surfaceY)
                 : d.heights[selected];
         return true;
+    }
+
+    boolean platform(net.minecraft.core.BlockPos p) {
+        for(Member member:members.values())if(member.state().origin.below().equals(p))return true;
+        return false;
     }
 
     /** Budgeted shared exterior scan; solid roofs protect enclosed sponge rooms. */
@@ -216,9 +233,33 @@ final class DrainTeam {
                     &&d.sandTops[spongeColumn]!=Integer.MIN_VALUE
                     &&spongeY>d.floors[spongeColumn]&&spongeY<=d.sandTops[spongeColumn];
             boolean accessGlass=block.is(Blocks.GLASS)&&d.scaffolds.contains(p);
-            if(!sponge&&!ownedSand&&!accessGlass&&!block.getCollisionShape(level,p).isEmpty()) {
+            if(!sponge&&!ownedSand&&!accessGlass&&!platform(p)&&!block.getCollisionShape(level,p).isEmpty()) {
                 spongeColumn++; spongeY=Integer.MAX_VALUE;
             } else spongeY--;
+        }
+    }
+
+    /** Recheck the exposed columns after completion as neighboring fluids settle. */
+    void inspectFinished(ServerLevel level) {
+        DrainState d=progress;
+        if(d.stage!=DrainState.Stage.DONE)return;
+        int limit=DrainJobs.repairBottom(level,d);
+        for(int budget=0;budget<256;budget++) {
+            if(checkColumn>=d.columns()) { checkColumn=0;checkY=Integer.MAX_VALUE;return; }
+            if(checkY==Integer.MAX_VALUE)checkY=d.surfaceY;
+            if(d.wall(d.column(checkColumn,d.surfaceY)) || checkY<limit) {
+                checkColumn++;checkY=Integer.MAX_VALUE;continue;
+            }
+            var p=d.column(checkColumn,checkY);
+            if(!WorkerBrain.loaded(level,p))return;
+            var block=level.getBlockState(p);
+            if(platform(p)) { checkY--;continue; }
+            if(DrainJobs.needsRepair(block,d,checkColumn,checkY)) {
+                advance(DrainState.Stage.REPAIR_WALLS);
+                checkColumn=0;checkY=Integer.MAX_VALUE;return;
+            }
+            if(!block.getCollisionShape(level,p).isEmpty()) { checkColumn++;checkY=Integer.MAX_VALUE; }
+            else checkY--;
         }
     }
 
@@ -243,6 +284,7 @@ final class DrainTeam {
 
     void advance(DrainState.Stage next) {
         progress.next(next);
+        if(next==DrainState.Stage.REPAIR_WALLS)progress.finishVersion=1;
         claims.clear();
         returned.clear();
         syncAll();

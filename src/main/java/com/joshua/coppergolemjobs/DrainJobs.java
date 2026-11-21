@@ -151,7 +151,9 @@ public final class DrainJobs {
         DrainState d=s.drain;
         if(d.stage==DrainState.Stage.NEW || d.columns()<=0 || d.spongeMaintenanceTick==level.getGameTime())return;
         d.spongeMaintenanceTick=level.getGameTime();
-        DrainTeam.join(level,g,s).cleanSponges(level);
+        DrainTeam team=DrainTeam.join(level,g,s);
+        team.cleanSponges(level);
+        team.inspectFinished(level);
     }
 
     public static void work(ServerLevel level, CopperGolem g, WorkerState s, ChestStorage storage) {
@@ -171,7 +173,7 @@ public final class DrainJobs {
             }
         }
         for(int budget=0;budget<32;budget++) {
-            if (switch(d.stage) { case SURVEY, CLEAR, FILL, WALLS, VERIFY, REMOVE -> !team.column(g,s); default -> false; }) return;
+            if (switch(d.stage) { case SURVEY, CLEAR, FILL, WALLS, VERIFY, REMOVE, REPAIR_WALLS, REPAIR_WATER, CHECK_DRY -> !team.column(g,s); default -> false; }) return;
             DrainState.Stage before=d.stage;
             int column=d.index;
             switch(d.stage) {
@@ -182,9 +184,12 @@ public final class DrainJobs {
                     if (arrive(level,g,s,s.origin)) team.home(g,DrainState.Stage.FILL);
                 }
                 case FILL -> fill(level,g,s,team);
-                case WALLS -> walls(level,g,s,false,team);
-                case VERIFY -> walls(level,g,s,true,team);
+                case WALLS -> walls(level,g,s,false,team,storage);
+                case VERIFY -> walls(level,g,s,true,team,storage);
                 case REMOVE -> remove(level,g,s,team);
+                case REPAIR_WALLS -> walls(level,g,s,false,team,storage);
+                case REPAIR_WATER -> repairWater(level,g,s,storage,team,false);
+                case CHECK_DRY -> repairWater(level,g,s,storage,team,true);
                 case RETURN -> {
                     s.status="Returning to starting platform";
                     if (arrive(level,g,s,s.origin)) team.home(g,DrainState.Stage.CLEANUP);
@@ -296,12 +301,33 @@ public final class DrainJobs {
         return b.is(Blocks.GLASS) || (!sponge(b) && !b.hasBlockEntity() && b.isCollisionShapeFullBlock(level,p) && b.getFluidState().isEmpty());
     }
     /** Wall bottoms share the lowest surveyed floor, closing terrain dips at the perimeter. */
-    private static void walls(ServerLevel level,CopperGolem g,WorkerState s,boolean verify,DrainTeam team) {
+    private static void walls(ServerLevel level,CopperGolem g,WorkerState s,boolean verify,DrainTeam team,ChestStorage storage) {
         DrainState d=s.drain;s.status=verify?"Checking the glass barrier":"Building exterior glass walls";
+        DrainState.Stage next=d.stage==DrainState.Stage.REPAIR_WALLS?DrainState.Stage.REPAIR_WATER
+                :verify?DrainState.Stage.REMOVE:DrainState.Stage.VERIFY;
         for(int budget=0;budget<128 && d.index<d.columns();budget++) {
             BlockPos p=d.column(d.index,d.y);
-            if(!d.wall(p)){team.complete(g,d,verify?DrainState.Stage.REMOVE:DrainState.Stage.VERIFY);return;}
-            if(d.y>d.surfaceY){team.complete(g,d,verify?DrainState.Stage.REMOVE:DrainState.Stage.VERIFY);return;}
+            if(!d.wall(p)){
+                if(d.stage==DrainState.Stage.REPAIR_WALLS) {
+                    // Surveying a high starting platform can hide a water-filled shaft
+                    // below it. Seal the base plane even for columns whose saved floor is high.
+                    BlockPos base=d.column(d.index,repairBottom(level,d));
+                    if(!WorkerBrain.loaded(level,base)){WorkerBrain.wait(g,s,"Waiting for drain foundation chunks");return;}
+                    BlockState floor=level.getBlockState(base);
+                    if(open(floor)) {
+                        var transaction=storage.plan();
+                        boolean upper=floor.is(Blocks.TALL_SEAGRASS)&&floor.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF)==DoubleBlockHalf.UPPER;
+                        var drops=plant(floor)&&!upper?List.of(new ItemStack(floor.is(Blocks.KELP)||floor.is(Blocks.KELP_PLANT)?Items.KELP:Items.SEAGRASS)):List.<ItemStack>of();
+                        if(!drops.isEmpty()&&(!transaction.add(drops)||!transaction.unchanged())) {
+                            WorkerBrain.wait(g,s,"Chest needs room for foundation vegetation");return;
+                        }
+                        if(!level.setBlock(base,Blocks.GLASS.defaultBlockState(),Block.UPDATE_ALL))return;
+                        if(!drops.isEmpty()&&!transaction.commit())s.pending.addAll(drops);
+                    }
+                }
+                team.complete(g,d,next);return;
+            }
+            if(d.y>d.surfaceY){team.complete(g,d,next);return;}
             if(sealed(level,p)){d.scaffolds.remove(p);d.y++;continue;}
             if(verify){team.advance(DrainState.Stage.WALLS);return;}
             BlockState b=level.getBlockState(p);
@@ -319,7 +345,7 @@ public final class DrainJobs {
         DrainState d=s.drain;s.status="Removing temporary sand: "+d.index+"/"+d.columns();
         for(int budget=0;budget<128 && d.index<d.columns();budget++) {
             int top=d.sandTops[d.index];
-            if(top==Integer.MIN_VALUE || top<=d.floors[d.index]){team.complete(g,d,DrainState.Stage.RETURN);return;}
+            if(top==Integer.MIN_VALUE || top<=d.floors[d.index]){team.complete(g,d,DrainState.Stage.REPAIR_WALLS);return;}
             BlockPos p=d.column(d.index,top);
             // Clear from above; the worker descends only through its own now-cleared sand column.
             if(!arrive(level,g,s,p.above()))return;
@@ -329,6 +355,52 @@ public final class DrainJobs {
             }
             // An unrelated replacement block is never removed, even inside the sand ledger.
             d.sandTops[d.index]--;return;
+        }
+    }
+
+    static int repairBottom(ServerLevel level,DrainState d) {
+        return Math.max(level.getMinY(),d.structureBottom==Integer.MIN_VALUE?d.bottomY:Math.min(d.bottomY,d.structureBottom));
+    }
+
+    static boolean needsRepair(BlockState b,DrainState d,int column,int y) {
+        return b.getFluidState().is(FluidTags.WATER) || sponge(b) || plant(b)
+                ||(b.is(Blocks.SAND)&&d.floors[column]!=Integer.MIN_VALUE&&y>d.floors[column]);
+    }
+
+    /** Inspect actual exterior blocks, stopping at the solid roof above a monument room. */
+    private static void repairWater(ServerLevel level,CopperGolem g,WorkerState s,ChestStorage storage,DrainTeam team,boolean verify) {
+        DrainState d=s.drain;
+        s.status=verify?"Checking the drain area is dry":"Removing remaining exterior water";
+        DrainState.Stage next=verify?DrainState.Stage.RETURN:DrainState.Stage.CHECK_DRY;
+        if(d.wall(d.column(d.index,d.surfaceY))) { team.complete(g,d,next);return; }
+        int limit=repairBottom(level,d);
+        for(int budget=0;budget<128;budget++) {
+            if(d.y<limit) { team.complete(g,d,next);return; }
+            BlockPos p=d.column(d.index,d.y);
+            if(!WorkerBrain.loaded(level,p)) { WorkerBrain.wait(g,s,"Waiting for final drain-check chunks");return; }
+            BlockState b=level.getBlockState(p);
+            if((b.is(Blocks.GLASS)&&d.scaffolds.contains(p))||team.platform(p)) { d.y--;continue; }
+            if(needsRepair(b,d,d.index,d.y)) {
+                if(verify) { team.advance(DrainState.Stage.REPAIR_WALLS);return; }
+                // Keep the monument block itself when its exposed face is waterlogged.
+                BlockState replacement=b.hasProperty(BlockStateProperties.WATERLOGGED)
+                        ?b.setValue(BlockStateProperties.WATERLOGGED,false):Blocks.AIR.defaultBlockState();
+                boolean upper=b.is(Blocks.TALL_SEAGRASS)&&b.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF)==DoubleBlockHalf.UPPER;
+                var drops=plant(b)&&!upper?List.of(new ItemStack(b.is(Blocks.KELP)||b.is(Blocks.KELP_PLANT)?Items.KELP:Items.SEAGRASS)):List.<ItemStack>of();
+                var transaction=storage.plan();
+                if(!drops.isEmpty()&&(!transaction.add(drops)||!transaction.unchanged())) {
+                    WorkerBrain.wait(g,s,"Chest needs room for remaining kelp or seagrass");return;
+                }
+                if(!level.setBlock(p,replacement,Block.UPDATE_ALL))return;
+                if(!drops.isEmpty()&&!transaction.commit())s.pending.addAll(drops);
+                if(b.is(Blocks.SAND)&&d.sandTops[d.index]>=d.y)d.sandTops[d.index]=d.y-1;
+                stop(g,s);
+                // A solid roof remains the boundary; never continue into the room below it.
+                if(!replacement.getCollisionShape(level,p).isEmpty()) { team.complete(g,d,next);return; }
+                d.y--;return;
+            }
+            if(!b.getCollisionShape(level,p).isEmpty()) { team.complete(g,d,next);return; }
+            d.y--;
         }
     }
 

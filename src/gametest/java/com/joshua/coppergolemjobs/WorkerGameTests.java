@@ -77,6 +77,10 @@ public final class WorkerGameTests {
         check(level.getBlockState(tunnelGapFloor).is(Blocks.COBBLESTONE),"3x3 tunnel builds a cobblestone path across a gap");
         s.assign(Job.PICKAXE,base,Direction.EAST); chest.clearContent();
         int quarryX=(base.getX()>>4)<<4,quarryZ=(base.getZ()>>4)<<4;
+        // Chunk alignment can put the entry step in the harness's barrier floor.
+        // Give the staircase the intended empty gap, independently of template position.
+        for(int y=base.getY()-2;y<=base.getY()+1;y++)
+            level.setBlock(new BlockPos(quarryX+1,y,quarryZ),Blocks.AIR.defaultBlockState(),3);
         for(int x=quarryX;x<quarryX+16;x++)for(int z=quarryZ;z<quarryZ+16;z++){BlockPos p=new BlockPos(x,base.getY(),z);if(!p.equals(chestPos))level.setBlock(p,Blocks.AIR.defaultBlockState(),3);}
         BlockPos ore=base.east();BlockPos second=base.south();
         level.setBlock(ore,Blocks.DIAMOND_ORE.defaultBlockState(),3);level.setBlock(second,Blocks.STONE.defaultBlockState(),3);
@@ -413,6 +417,58 @@ public final class WorkerGameTests {
     }
 
     @GameTest(maxTicks = 100, skyAccess = true, padding = 80)
+    public void returningCrewRepairsWater(GameTestHelper helper) {
+        ServerLevel level=helper.getLevel();BlockPos base=helper.absolutePos(new BlockPos(4,10,4));
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-5,-4,-5),base.offset(5,3,5)))
+            level.setBlock(p,p.getY()==base.getY()-4?Blocks.SAND.defaultBlockState():
+                    p.getY()<=base.getY()?Blocks.WATER.defaultBlockState():Blocks.AIR.defaultBlockState(),2);
+        BlockPos home=base.above();level.setBlock(base,Blocks.COBBLESTONE.defaultBlockState(),2);
+        BlockPos roof=base.below(2),room=base.below(3);
+        for(BlockPos p:BlockPos.betweenClosed(base.offset(-1,-3,-1),base.offset(1,-2,1)))
+            if(p.getY()==roof.getY()||p.getX()!=base.getX()||p.getZ()!=base.getZ())level.setBlock(p,Blocks.PRISMARINE.defaultBlockState(),2);
+        BlockPos chestPos=base.offset(0,1,-4);
+        level.setBlock(chestPos,BuiltInRegistries.BLOCK.getValue(Identifier.withDefaultNamespace("copper_chest")).defaultBlockState(),2);
+        CopperGolem g=EntityTypes.COPPER_GOLEM.create(level,net.minecraft.world.entity.EntitySpawnReason.COMMAND);
+        g.setPos(Vec3.atBottomCenterOf(home));g.setNoAi(true);level.addFreshEntity(g);
+        WorkerState s=((WorkerAccess)g).copperJobs$state();s.assign(Job.DRAIN,home,Direction.NORTH);
+        s.drain.begin(new net.minecraft.world.level.levelgen.structure.BoundingBox(base.getX()-1,base.getY()-4,base.getZ()-1,
+                base.getX()+1,base.getY()-2,base.getZ()+1),base.getY());
+        s.drain.stage=DrainState.Stage.RETURN;s.drain.bottomY=base.getY()-4;
+        // Deliberately incorrect old survey heights must not hide a standing wall of water.
+        java.util.Arrays.fill(s.drain.floors,base.getY());
+        for(int c=0;c<s.drain.columns();c++)if(!s.drain.wall(s.drain.column(c,base.getY()))) {
+            BlockPos p=s.drain.column(c,base.getY());
+            if(p.getX()<base.getX())for(int y=base.getY()-3;y<=base.getY();y++)level.setBlock(s.drain.column(c,y),Blocks.AIR.defaultBlockState(),2);
+        }
+        s.drain.floors[8]=base.getY()-4;
+        BlockPos leftover=s.drain.column(8,base.getY());level.setBlock(leftover,Blocks.SAND.defaultBlockState(),2);
+        BlockPos stairs=base.offset(2,-2,1);
+        level.setBlock(stairs,Blocks.PRISMARINE_STAIRS.defaultBlockState().setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.WATERLOGGED,true),2);
+        boolean repaired=false,reloaded=false;
+        for(int n=0;n<10000&&s.drain.stage!=DrainState.Stage.DONE;n++) {
+            if(s.drain.travel!=null)g.setPos(Vec3.atBottomCenterOf(s.drain.travel));
+            DrainJobs.work(level,g,s,ChestStorage.nearby(level,g));
+            repaired|=s.drain.stage==DrainState.Stage.REPAIR_WATER;
+            if(s.drain.stage==DrainState.Stage.REPAIR_WATER&&!reloaded) {
+                var out=TagValueOutput.createWithContext(ProblemReporter.DISCARDING,level.registryAccess());s.save(out);
+                s.load(TagValueInput.create(ProblemReporter.DISCARDING,level.registryAccess(),out.buildResult()));
+                checkQuiet(s.drain.finishVersion==1,"final repair migration survives save and reload");reloaded=true;
+            }
+        }
+        check(repaired&&reloaded&&s.drain.stage==DrainState.Stage.DONE,"returning legacy crew resumes sealing and removes remaining water despite stale survey heights");
+        check(level.getBlockState(leftover).isAir(),"final repair removes leftover temporary sand missed by the old removal ledger");
+        check(level.getBlockState(stairs).is(Blocks.PRISMARINE_STAIRS)&&!level.getFluidState(stairs).is(net.minecraft.tags.FluidTags.WATER),"exposed waterlogged roof blocks are dried without breaking the monument");
+        check(level.getBlockState(roof).is(Blocks.PRISMARINE)&&level.getBlockState(room).is(Blocks.WATER)
+                &&level.getBlockState(base.offset(4,-1,0)).is(Blocks.WATER),"final repair preserves enclosed room water and the ocean outside the project");
+        // A fluid update after completion must reopen the project instead of being ignored.
+        BlockPos refill=base.offset(2,0,-1);level.setBlock(refill,Blocks.WATER.defaultBlockState(),2);
+        s.drain.spongeMaintenanceTick=Long.MIN_VALUE;
+        DrainJobs.work(level,g,s,ChestStorage.nearby(level,g));
+        check(s.drain.stage!=DrainState.Stage.DONE,"a completed crew resumes repairs when exterior water returns");
+        g.discard();helper.succeed();
+    }
+
+    @GameTest(maxTicks = 100, skyAccess = true, padding = 80)
     public void drainSpongeCleanup(GameTestHelper helper) {
         ServerLevel level=helper.getLevel();BlockPos base=helper.absolutePos(new BlockPos(4,12,4));
         for(BlockPos p:BlockPos.betweenClosed(base.offset(-4,-6,-4),base.offset(4,3,4)))
@@ -476,9 +532,11 @@ public final class WorkerGameTests {
         ServerLevel level=helper.getLevel();BlockPos base=helper.absolutePos(new BlockPos(4,8,4));
         CopperGolem[] crew=new CopperGolem[64];WorkerState[] states=new WorkerState[64];
         var stages=new DrainState.Stage[]{DrainState.Stage.SURVEY,DrainState.Stage.CLEAR,DrainState.Stage.FILL,
-                DrainState.Stage.WALLS,DrainState.Stage.VERIFY,DrainState.Stage.REMOVE};
+                DrainState.Stage.WALLS,DrainState.Stage.VERIFY,DrainState.Stage.REMOVE,
+                DrainState.Stage.REPAIR_WALLS,DrainState.Stage.REPAIR_WATER,DrainState.Stage.CHECK_DRY};
         var next=new DrainState.Stage[]{DrainState.Stage.CLEAR,DrainState.Stage.SURFACE,DrainState.Stage.WALLS,
-                DrainState.Stage.VERIFY,DrainState.Stage.REMOVE,DrainState.Stage.RETURN};
+                DrainState.Stage.VERIFY,DrainState.Stage.REMOVE,DrainState.Stage.REPAIR_WALLS,
+                DrainState.Stage.REPAIR_WATER,DrainState.Stage.CHECK_DRY,DrainState.Stage.RETURN};
         for(int n=0;n<stages.length;n++) {
             // Separate sites keep each simulated restart independent of the live team cache.
             BlockPos site=base.above(n*2);
@@ -766,7 +824,13 @@ public final class WorkerGameTests {
         partnerState.drain.begin(new net.minecraft.world.level.levelgen.structure.BoundingBox(base.getX()-1,base.getY()-4,base.getZ()-1,
             base.getX()+1,base.getY()-2,base.getZ()+1),base.getY());
         CopperGolem[] lateHelper=new CopperGolem[1];
+        boolean[] injectedWater={false};long[] drySince={-1};
         helper.onEachTick(()->{
+            if(s.drain.stage==DrainState.Stage.RETURN&&!injectedWater[0]) {
+                level.setBlock(base.offset(2,-1,0),Blocks.WATER.defaultBlockState(),3);injectedWater[0]=true;
+            }
+            if(s.drain.stage!=DrainState.Stage.DONE)drySince[0]=-1;
+            else if(drySince[0]<0)drySince[0]=helper.getTick();
             if(lateHelper[0]==null && s.drain.stage==DrainState.Stage.FILL) {
                 for(int column=0;column<s.drain.columns();column++) {
                     if(s.drain.sandTops[column]!=s.drain.surfaceY)continue;
@@ -784,7 +848,11 @@ public final class WorkerGameTests {
             }
             if(helper.getTick()%1000==0)System.out.println("LIVE DRAIN "+helper.getTick()+" "+s.drain.stage+" "+s.drain.index+" "+s.drain.y+" "+s.status+" "+g.position()+" target="+s.drain.travel+" phase="+s.drain.routePhase+" route="+s.drain.route+" lid="+(s.drain.travel==null?"none":level.getBlockState(new BlockPos(s.drain.travel.getX(),s.drain.surfaceY,s.drain.travel.getZ()))) );
             checkQuiet(level.getBlockState(base.below(2)).is(Blocks.PRISMARINE),"live drain must preserve roof");
-            if(s.drain.stage==DrainState.Stage.DONE) {
+            if(s.drain.stage==DrainState.Stage.DONE&&helper.getTick()-drySince[0]>=40) {
+                check(level.getBlockState(partnerHome.below(5)).is(Blocks.GLASS),
+                        "live final repair seals the ravine beneath a high worker starting platform");
+                check(injectedWater[0]&&level.getBlockState(base.offset(2,-1,0)).isAir(),
+                        "live crew detects and removes water introduced during return, then stays dry through fluid ticks");
                 check(g.position().distanceToSqr(Vec3.atBottomCenterOf(base.above()))<.5,"live drain walks, swims, finishes and returns home without test teleports");
                 check(level.getBlockState(base.below(3)).is(Blocks.WATER),"live drain keeps sealed interior water intact through fluid ticks");
                 check(count((Container)level.getBlockEntity(chestPos),Items.SAND)==0,"live drain creates no sand payout");
